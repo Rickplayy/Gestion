@@ -1,4 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { parseExcelBuffer } from './utils/excelParser';
+import { generateGroupsFromBuffer, exportToExcel } from './utils/groupGenerator';
 import './App.css';
 
 function App() {
@@ -11,6 +13,13 @@ function App() {
   // Form States
   const [studentForm, setStudentForm] = useState({ name: '', boleta: '', careerId: '', address: '' });
   const [loginForm, setLoginForm] = useState({ username: '', password: '' });
+  const fileInputRef = useRef(null);
+  const fileGeneratorRef = useRef(null);
+  const fileLugaresRef = useRef(null);
+  const [aspirantesFile, setAspirantesFile] = useState(null);
+  const [lugaresFile, setLugaresFile] = useState(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
 
   const API_URL = 'http://localhost:3001/api';
 
@@ -81,6 +90,63 @@ function App() {
     setMessage({ text: 'Sesión cerrada', type: 'success' });
   };
 
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    try {
+      const buffer = await file.arrayBuffer();
+      const parsedData = parseExcelBuffer(buffer);
+      
+      const res = await fetch(`${API_URL}/students/bulk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(parsedData)
+      });
+      
+      const data = await res.json();
+      if (res.ok) {
+        setMessage({ text: data.message, type: 'success' });
+        fetchStudents(); // Refresh list
+      } else {
+        setMessage({ text: data.error || 'Error al importar excel', type: 'error' });
+      }
+    } catch (err) {
+      console.error(err);
+      setMessage({ text: 'Error procesando el archivo: ' + err.message, type: 'error' });
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleGenerateExcel = async () => {
+    if (!aspirantesFile || !lugaresFile) {
+      setMessage({ text: 'Por favor selecciona ambos archivos.', type: 'error' });
+      return;
+    }
+
+    setIsGenerating(true);
+    setMessage({ text: 'Procesando archivo y generando secuencias...', type: 'success' });
+    try {
+      const aspirantesBuffer = await aspirantesFile.arrayBuffer();
+      const lugaresBuffer = await lugaresFile.arrayBuffer();
+      const generatedData = generateGroupsFromBuffer(aspirantesBuffer, lugaresBuffer);
+      await exportToExcel(generatedData);
+      setMessage({ text: 'Archivo guardado exitosamente.', type: 'success' });
+    } catch (err) {
+      console.error(err);
+      setMessage({ text: 'Error generando el archivo: ' + err.message, type: 'error' });
+    } finally {
+      setIsGenerating(false);
+      setAspirantesFile(null);
+      setLugaresFile(null);
+      if (fileGeneratorRef.current) fileGeneratorRef.current.value = '';
+      if (fileLugaresRef.current) fileLugaresRef.current.value = '';
+    }
+  };
+
   return (
     <div className="app-container">
       <nav className="navbar">
@@ -92,6 +158,7 @@ function App() {
           ) : (
             <>
               <button onClick={() => setView('dashboard')} className={view === 'dashboard' ? 'active' : ''}>Alumnos</button>
+              <button onClick={() => setView('generator')} className={view === 'generator' ? 'active' : ''}>Generador Grupos</button>
               <button onClick={logout}>Cerrar Sesión</button>
             </>
           )}
@@ -157,7 +224,26 @@ function App() {
 
         {view === 'dashboard' && isLoggedIn && (
           <div className="dashboard-container">
-            <h2>Listado de Alumnos Registrados</h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2>Listado de Alumnos Registrados</h2>
+              <div>
+                <input 
+                  type="file" 
+                  accept=".xlsx, .xls" 
+                  ref={fileInputRef} 
+                  style={{ display: 'none' }} 
+                  onChange={handleFileUpload} 
+                />
+                <button 
+                  className="btn-primary" 
+                  style={{ marginTop: 0 }} 
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploading}
+                >
+                  {isUploading ? 'Procesando...' : 'Importar Excel'}
+                </button>
+              </div>
+            </div>
             <table className="students-table">
               <thead>
                 <tr>
@@ -178,6 +264,52 @@ function App() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {view === 'generator' && isLoggedIn && (
+          <div className="dashboard-container">
+            <div className="login-card" style={{maxWidth: '600px', margin: '0 auto', textAlign: 'center'}}>
+              <h2>Generador de Secuencias</h2>
+              <p>Sube el archivo de Aspirantes y el archivo de Lugares para asignar grupos.</p>
+              
+              <div style={{ marginTop: '1rem', textAlign: 'left', background: '#f9f9f9', padding: '1rem', borderRadius: '8px' }}>
+                <div style={{ marginBottom: '1rem' }}>
+                  <strong>1. Archivo de Aspirantes Inscritos:</strong><br/>
+                  <input 
+                    type="file" 
+                    accept=".xlsx, .xls" 
+                    ref={fileGeneratorRef} 
+                    style={{ display: 'none' }} 
+                    onChange={e => setAspirantesFile(e.target.files[0])} 
+                  />
+                  <button className="btn-primary" onClick={() => fileGeneratorRef.current?.click()} style={{ width: 'auto', padding: '0.5rem 1rem', marginTop: '0.5rem' }}>Seleccionar</button>
+                  <span style={{ marginLeft: '1rem', fontSize: '0.9rem' }}>{aspirantesFile ? aspirantesFile.name : 'Ningún archivo seleccionado'}</span>
+                </div>
+                
+                <div>
+                  <strong>2. Archivo de Lugares (Capacidades):</strong><br/>
+                  <input 
+                    type="file" 
+                    accept=".xlsx, .xls" 
+                    ref={fileLugaresRef} 
+                    style={{ display: 'none' }} 
+                    onChange={e => setLugaresFile(e.target.files[0])} 
+                  />
+                  <button className="btn-primary" onClick={() => fileLugaresRef.current?.click()} style={{ width: 'auto', padding: '0.5rem 1rem', marginTop: '0.5rem' }}>Seleccionar</button>
+                  <span style={{ marginLeft: '1rem', fontSize: '0.9rem' }}>{lugaresFile ? lugaresFile.name : 'Ningún archivo seleccionado'}</span>
+                </div>
+              </div>
+              
+              <button 
+                  className="btn-primary" 
+                  onClick={handleGenerateExcel}
+                  disabled={isGenerating || !aspirantesFile || !lugaresFile}
+                  style={{ padding: '1rem', fontSize: '1.2rem', marginTop: '2rem' }}
+                >
+                  {isGenerating ? 'Generando...' : 'Procesar y Descargar'}
+              </button>
+            </div>
           </div>
         )}
       </main>

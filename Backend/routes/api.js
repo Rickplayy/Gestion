@@ -73,4 +73,41 @@ router.get('/students', async (req, res) => {
     }
 });
 
+// Bulk register students (Excel import)
+router.post('/students/bulk', async (req, res) => {
+    try {
+        const studentsData = req.body; // Array of parsed excel records
+        
+        // Get all careers to map PROGRAMA_EDUCATIVO to careerId
+        const careers = await Career.findAll();
+        
+        const newStudents = [];
+        
+        for (const record of studentsData) {
+            // Find career by name case insensitive using JS or DB
+            let career = careers.find(c => 
+                c.name.toLowerCase().replace(/á/g, 'a').replace(/é/g, 'e').replace(/í/g, 'i').replace(/ó/g, 'o').replace(/ú/g, 'u') === 
+                String(record.PROGRAMA_EDUCATIVO || '').toLowerCase().replace(/á/g, 'a').replace(/é/g, 'e').replace(/í/g, 'i').replace(/ó/g, 'o').replace(/ú/g, 'u')
+            );
+            
+            // If not found, you could set a default or create it, for now we will just use the first career if none matched (or leave it null if possible)
+            const careerId = career ? career.id : (careers[0] ? careers[0].id : null);
+            
+            newStudents.push({
+                name: record.NOMBRE || 'Sin nombre',
+                boleta: record.BOLETA || `N/A-${Math.floor(Math.random() * 10000)}`,
+                address: record.DOMICILIO || 'Sin dirección',
+                careerId: careerId
+            });
+        }
+        
+        // bulkCreate with ignoreDuplicates: true allows it to skip if boleta is duplicate
+        const createdStudents = await Student.bulkCreate(newStudents, { ignoreDuplicates: true });
+        
+        res.status(201).json({ message: `${createdStudents.length} alumnos procesados exitosamente.` });
+    } catch (err) {
+        res.status(400).json({ error: err.message });
+    }
+});
+
 module.exports = router;
