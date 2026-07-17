@@ -6,107 +6,184 @@ const Admin = require('../models/Admin');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
-// Admin Login
-router.post('/login', async (req, res) => {
-    try {
-        const { username, password } = req.body;
-        const admin = await Admin.findOne({ where: { username } });
-        
-        if (!admin) {
-            return res.status(401).json({ error: 'Usuario no encontrado' });
-        }
+const JWT_SECRET = process.env.JWT_SECRET;
 
-        const isMatch = await bcrypt.compare(password, admin.password);
-        if (!isMatch) {
-            return res.status(401).json({ error: 'Contraseña incorrecta' });
-        }
+// --- Rate limiting simple en memoria para /login (5 intentos por IP cada 15 min) ---
+const loginAttempts = new Map();
+const MAX_ATTEMPTS = 5;
+const WINDOW_MS = 15 * 60 * 1000;
 
-        const token = jwt.sign({ id: admin.id }, process.env.JWT_SECRET || 'secret', { expiresIn: '1h' });
-        res.json({ token });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
+const loginRateLimit = (req, res, next) => {
+    const ip = req.ip;
+    const now = Date.now();
+    const entry = loginAttempts.get(ip);
+
+    if (entry && now - entry.first < WINDOW_MS) {
+        if (entry.count >= MAX_ATTEMPTS) {
+            return res.status(429).json({ error: 'Demasiados intentos. Intenta de nuevo en 15 minutos.' });
+        }
+        entry.count++;
+    } else {
+        loginAttempts.set(ip, { first: now, count: 1 });
     }
-});
+    next();
+};
 
-// Middleware to protect routes (optional for now, but good practice)
+// Limpieza periódica para que el mapa no crezca sin límite
+setInterval(() => {
+    const now = Date.now();
+    for (const [ip, entry] of loginAttempts) {
+        if (now - entry.first >= WINDOW_MS) loginAttempts.delete(ip);
+    }
+}, WINDOW_MS).unref();
+
+// --- Middleware de autenticación (acepta "Bearer <token>" o el token directo) ---
 const auth = (req, res, next) => {
-    const token = req.header('Authorization');
-    if (!token) return res.status(401).json({ error: 'Acceso denegado' });
+    const header = req.header('Authorization');
+    if (!header) return res.status(401).json({ error: 'Acceso denegado' });
+
+    const token = header.startsWith('Bearer ') ? header.slice(7) : header;
 
     try {
-        const verified = jwt.verify(token, process.env.JWT_SECRET || 'secret');
-        req.admin = verified;
+        req.admin = jwt.verify(token, JWT_SECRET);
         next();
     } catch (err) {
-        res.status(400).json({ error: 'Token no válido' });
+        res.status(401).json({ error: 'Token no válido o expirado' });
     }
 };
 
-// Get all careers
+// Admin Login
+router.post('/login', loginRateLimit, async (req, res) => {
+    try {
+        const { username, password } = req.body;
+        if (typeof username !== 'string' || typeof password !== 'string') {
+            return res.status(400).json({ error: 'Credenciales inválidas' });
+        }
+
+        const admin = await Admin.findOne({ where: { username } });
+        // Mensaje único para no revelar si el usuario existe (anti-enumeración)
+        const isMatch = admin && await bcrypt.compare(password, admin.password);
+        if (!isMatch) {
+            return res.status(401).json({ error: 'Credenciales inválidas' });
+        }
+
+        // Login exitoso: resetear contador de intentos de esta IP
+        loginAttempts.delete(req.ip);
+
+        const token = jwt.sign({ id: admin.id }, JWT_SECRET, { expiresIn: '1h' });
+        res.json({ token });
+    } catch (err) {
+        console.error('Error en /login:', err);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});
+
+// Get all careers (público: lo usa el formulario de registro)
 router.get('/careers', async (req, res) => {
     try {
         const careers = await Career.findAll();
         res.json(careers);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('Error en GET /careers:', err);
+        res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
 
-// Register a student (Public or protected? User said "generes la interfaz base", usually public for registration)
+// Validación básica de un alumno
+const validateStudent = ({ name, boleta, address }) => {
+    if (typeof name !== 'string' || !name.trim() || name.length > 200) return 'Nombre inválido';
+    if (typeof boleta !== 'string' || !boleta.trim() || boleta.length > 20) return 'Boleta inválida';
+    if (typeof address !== 'string' || !address.trim() || address.length > 500) return 'Dirección inválida';
+    return null;
+};
+
+// Register a student (público: formulario de registro)
 router.post('/students', async (req, res) => {
     try {
         const { name, boleta, address, careerId } = req.body;
-        const student = await Student.create({ name, boleta, address, careerId });
+
+        const invalid = validateStudent({ name, boleta, address });
+        if (invalid) return res.status(400).json({ error: invalid });
+
+        const career = await Career.findByPk(careerId);
+        if (!career) return res.status(400).json({ error: 'Carrera inválida' });
+
+        const student = await Student.create({
+            name: name.trim(),
+            boleta: boleta.trim(),
+            address: address.trim(),
+            careerId: career.id
+        });
         res.status(201).json(student);
     } catch (err) {
-        res.status(400).json({ error: err.message });
+        if (err.name === 'SequelizeUniqueConstraintError') {
+            return res.status(409).json({ error: 'Esa boleta ya está registrada' });
+        }
+        console.error('Error en POST /students:', err);
+        res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
 
-// Get all students (Admin only)
-router.get('/students', async (req, res) => {
+// Get all students (solo admin)
+router.get('/students', auth, async (req, res) => {
     try {
         const students = await Student.findAll({ include: Career });
         res.json(students);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('Error en GET /students:', err);
+        res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
 
-// Bulk register students (Excel import)
-router.post('/students/bulk', async (req, res) => {
+// Bulk register students - importación de Excel (solo admin)
+const MAX_BULK_RECORDS = 5000;
+
+router.post('/students/bulk', auth, async (req, res) => {
     try {
-        const studentsData = req.body; // Array of parsed excel records
-        
+        const studentsData = req.body;
+
+        if (!Array.isArray(studentsData)) {
+            return res.status(400).json({ error: 'Se esperaba un arreglo de registros' });
+        }
+        if (studentsData.length === 0) {
+            return res.status(400).json({ error: 'El archivo no contiene registros' });
+        }
+        if (studentsData.length > MAX_BULK_RECORDS) {
+            return res.status(400).json({ error: `Máximo ${MAX_BULK_RECORDS} registros por importación` });
+        }
+
         // Get all careers to map PROGRAMA_EDUCATIVO to careerId
         const careers = await Career.findAll();
-        
+
+        const normalize = (s) => String(s || '')
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .trim();
+
         const newStudents = [];
-        
+
         for (const record of studentsData) {
-            // Find career by name case insensitive using JS or DB
-            let career = careers.find(c => 
-                c.name.toLowerCase().replace(/á/g, 'a').replace(/é/g, 'e').replace(/í/g, 'i').replace(/ó/g, 'o').replace(/ú/g, 'u') === 
-                String(record.PROGRAMA_EDUCATIVO || '').toLowerCase().replace(/á/g, 'a').replace(/é/g, 'e').replace(/í/g, 'i').replace(/ó/g, 'o').replace(/ú/g, 'u')
-            );
-            
-            // If not found, you could set a default or create it, for now we will just use the first career if none matched (or leave it null if possible)
+            if (!record || typeof record !== 'object') continue;
+
+            const career = careers.find(c => normalize(c.name) === normalize(record.PROGRAMA_EDUCATIVO));
             const careerId = career ? career.id : (careers[0] ? careers[0].id : null);
-            
+
             newStudents.push({
-                name: record.NOMBRE || 'Sin nombre',
-                boleta: record.BOLETA || `N/A-${Math.floor(Math.random() * 10000)}`,
-                address: record.DOMICILIO || 'Sin dirección',
+                name: String(record.NOMBRE || 'Sin nombre').slice(0, 200),
+                boleta: String(record.BOLETA || `N/A-${Date.now()}-${newStudents.length}`).slice(0, 20),
+                address: String(record.DOMICILIO || 'Sin dirección').slice(0, 500),
                 careerId: careerId
             });
         }
-        
-        // bulkCreate with ignoreDuplicates: true allows it to skip if boleta is duplicate
+
+        // ignoreDuplicates: true omite registros con boleta repetida
         const createdStudents = await Student.bulkCreate(newStudents, { ignoreDuplicates: true });
-        
+
         res.status(201).json({ message: `${createdStudents.length} alumnos procesados exitosamente.` });
     } catch (err) {
-        res.status(400).json({ error: err.message });
+        console.error('Error en POST /students/bulk:', err);
+        res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
 

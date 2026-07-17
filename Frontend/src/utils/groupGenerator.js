@@ -1,4 +1,4 @@
-import * as XLSX from "xlsx";
+import { limpiar, readSheetRows, findHeaderRow, getXLSX } from "./excelUtils";
 
 const sequenceMap = {
   "ADMINISTRACIÓN INDUSTRIAL": ["1AM10", "1AM11", "1AM12", "1AV10", "1AV11", "1AV12", "1AV13"],
@@ -28,14 +28,10 @@ const getTurnoFromSequence = (seq) => {
   return 'Indefinido';
 };
 
-const limpiar = (valor) => String(valor ?? "").trim();
-
-function extractLugares(buffer) {
+async function extractLugares(buffer) {
   if (!buffer) return {};
-  const workbook = XLSX.read(buffer, { type: 'array', cellDates: false });
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
-  
+  const rows = await readSheetRows(buffer);
+
   const map = {};
   for (const row of rows) {
     if (!row || row.length < 2) continue;
@@ -48,24 +44,12 @@ function extractLugares(buffer) {
   return map;
 }
 
-export function generateGroupsFromBuffer(aspirantesBuffer, lugaresBuffer) {
-  const lugaresMap = extractLugares(lugaresBuffer);
+export async function generateGroupsFromBuffer(aspirantesBuffer, lugaresBuffer) {
+  const lugaresMap = await extractLugares(lugaresBuffer);
 
-  const workbook = XLSX.read(aspirantesBuffer, { type: 'array', cellDates: false });
-  const sheetName = workbook.SheetNames.find(s => s.toUpperCase().includes('ASPIRANTES')) || workbook.SheetNames[0];
-  const sheet = workbook.Sheets[sheetName];
+  const rows = await readSheetRows(aspirantesBuffer, { sheetNameIncludes: 'ASPIRANTES' });
 
-  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
-  
-  // Find header index
-  let headerRowIndex = -1;
-  for (let i = 0; i < rows.length; i++) {
-    const texto = rows[i].map(limpiar).join(" ").toUpperCase();
-    if (texto.includes("BOLETA") && texto.includes("NOMBRE")) {
-      headerRowIndex = i;
-      break;
-    }
-  }
+  const headerRowIndex = findHeaderRow(rows, ["BOLETA", "NOMBRE"]);
 
   if (headerRowIndex === -1) throw new Error("No se encontró la cabecera en el Excel");
 
@@ -95,6 +79,19 @@ export function generateGroupsFromBuffer(aspirantesBuffer, lugaresBuffer) {
   }
 
   const finalAssignments = [];
+
+  const asignar = (student, seq) => {
+    finalAssignments.push({
+      Boleta: student.boleta,
+      Nombre: student.nombre,
+      Carrera: student.carrera,
+      Turno: getTurnoFromSequence(seq),
+      Genero: student.genero,
+      Promedio: student.promedio,
+      Kms: 0,
+      Secuencia: seq
+    });
+  };
 
   for (const carrera in recordsByCareer) {
     // Ordenar de mayor a menor promedio
@@ -128,81 +125,27 @@ export function generateGroupsFromBuffer(aspirantesBuffer, lugaresBuffer) {
 
       // Assign women up to quota
       while (assignedCount < womenQuota && mujeres.length > 0) {
-        const student = mujeres.shift();
-        finalAssignments.push({
-          Boleta: student.boleta,
-          Nombre: student.nombre,
-          Carrera: student.carrera,
-          Turno: getTurnoFromSequence(seq),
-          Genero: student.genero,
-          Promedio: student.promedio,
-          Kms: 0,
-          Secuencia: seq
-        });
+        asignar(mujeres.shift(), seq);
         assignedCount++;
       }
 
       // Assign men to fill the rest of the capacity
       while (assignedCount < capacityPerSeq && hombres.length > 0) {
-        const student = hombres.shift();
-        finalAssignments.push({
-          Boleta: student.boleta,
-          Nombre: student.nombre,
-          Carrera: student.carrera,
-          Turno: getTurnoFromSequence(seq),
-          Genero: student.genero,
-          Promedio: student.promedio,
-          Kms: 0,
-          Secuencia: seq
-        });
+        asignar(hombres.shift(), seq);
         assignedCount++;
       }
-      
+
       // If we still have space but men are out, fill with remaining women
       while (assignedCount < capacityPerSeq && mujeres.length > 0) {
-        const student = mujeres.shift();
-        finalAssignments.push({
-          Boleta: student.boleta,
-          Nombre: student.nombre,
-          Carrera: student.carrera,
-          Turno: getTurnoFromSequence(seq),
-          Genero: student.genero,
-          Promedio: student.promedio,
-          Kms: 0,
-          Secuencia: seq
-        });
+        asignar(mujeres.shift(), seq);
         assignedCount++;
       }
     }
 
     // If any students left (due to rounding errors), put them in the last sequence
     const lastSeq = sortedSequences[sortedSequences.length - 1];
-    while (mujeres.length > 0) {
-        const student = mujeres.shift();
-        finalAssignments.push({
-          Boleta: student.boleta,
-          Nombre: student.nombre,
-          Carrera: student.carrera,
-          Turno: getTurnoFromSequence(lastSeq),
-          Genero: student.genero,
-          Promedio: student.promedio,
-          Kms: 0,
-          Secuencia: lastSeq
-        });
-    }
-    while (hombres.length > 0) {
-        const student = hombres.shift();
-        finalAssignments.push({
-          Boleta: student.boleta,
-          Nombre: student.nombre,
-          Carrera: student.carrera,
-          Turno: getTurnoFromSequence(lastSeq),
-          Genero: student.genero,
-          Promedio: student.promedio,
-          Kms: 0,
-          Secuencia: lastSeq
-        });
-    }
+    while (mujeres.length > 0) asignar(mujeres.shift(), lastSeq);
+    while (hombres.length > 0) asignar(hombres.shift(), lastSeq);
   }
 
   if (finalAssignments.length === 0) {
@@ -213,6 +156,7 @@ export function generateGroupsFromBuffer(aspirantesBuffer, lugaresBuffer) {
 }
 
 export async function exportToExcel(data, defaultFilename = 'gruposAsignados31secuencias.xlsx') {
+  const XLSX = await getXLSX();
   const ws = XLSX.utils.json_to_sheet(data);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Grupos Asignados");

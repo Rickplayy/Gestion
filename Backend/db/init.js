@@ -9,16 +9,23 @@ const createDatabase = async () => {
         port: process.env.DB_PORT,
     });
 
+    const dbName = process.env.DB_NAME;
+    // CREATE DATABASE no acepta parámetros, así que validamos el nombre
+    // estrictamente antes de interpolarlo (solo letras, números y guion bajo).
+    if (!dbName || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(dbName)) {
+        throw new Error(`DB_NAME inválido: "${dbName}". Usa solo letras, números y guion bajo.`);
+    }
+
     try {
         await client.connect();
-        const res = await client.query(`SELECT 1 FROM pg_database WHERE datname = '${process.env.DB_NAME}'`);
-        
+        const res = await client.query('SELECT 1 FROM pg_database WHERE datname = $1', [dbName]);
+
         if (res.rowCount === 0) {
-            console.log(`Database ${process.env.DB_NAME} does not exist. Creating...`);
-            await client.query(`CREATE DATABASE ${process.env.DB_NAME}`);
-            console.log(`Database ${process.env.DB_NAME} created successfully.`);
+            console.log(`Database ${dbName} does not exist. Creating...`);
+            await client.query(`CREATE DATABASE "${dbName}"`);
+            console.log(`Database ${dbName} created successfully.`);
         } else {
-            console.log(`Database ${process.env.DB_NAME} already exists.`);
+            console.log(`Database ${dbName} already exists.`);
         }
     } catch (err) {
         console.error('Error creating database:', err);

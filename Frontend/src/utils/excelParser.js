@@ -1,11 +1,4 @@
-import * as XLSX from "xlsx";
-
-function limpiar(valor) {
-  return String(valor ?? "")
-    .replace(/\s+/g, " ")
-    .replace(/\u00a0/g, " ")
-    .trim();
-}
+import { limpiar, readSheetRows, findHeaderRow } from "./excelUtils";
 
 function extraerDomicilio(domicilio) {
   const d = limpiar(domicilio);
@@ -32,18 +25,6 @@ function extraerDomicilio(domicilio) {
   };
 }
 
-function esFilaHeader(row) {
-  const texto = row.map(limpiar).join(" ").toUpperCase();
-  return (
-    texto.includes("BOLETA") &&
-    texto.includes("CURP") &&
-    texto.includes("NOMBRE") &&
-    texto.includes("DOMICILIO") &&
-    texto.includes("EMAIL") &&
-    texto.includes("FOLIO")
-  );
-}
-
 function esFilaDatos(row) {
   const curp = limpiar(row[2]);
   return /^[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]\d$/i.test(curp);
@@ -54,25 +35,12 @@ function aTexto(valor) {
   return v === "" ? null : v;
 }
 
-export function parseExcelBuffer(buffer) {
-  const workbook = XLSX.read(buffer, { type: 'array', cellDates: false });
-  const sheetName = workbook.SheetNames[0];
-  const sheet = workbook.Sheets[sheetName];
+export async function parseExcelBuffer(buffer) {
+  const rows = await readSheetRows(buffer);
 
-  const rows = XLSX.utils.sheet_to_json(sheet, {
-    header: 1,
-    defval: "",
-    raw: false,
-  });
-
-  let headerRowIndex = -1;
-
-  for (let i = 0; i < rows.length; i++) {
-    if (esFilaHeader(rows[i])) {
-      headerRowIndex = i;
-      break;
-    }
-  }
+  const headerRowIndex = findHeaderRow(rows, [
+    "BOLETA", "CURP", "NOMBRE", "DOMICILIO", "EMAIL", "FOLIO",
+  ]);
 
   if (headerRowIndex === -1) {
     throw new Error("No se encontró la fila de encabezados reales");

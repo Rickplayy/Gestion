@@ -23,23 +23,41 @@ function App() {
 
   const API_URL = 'http://localhost:3001/api';
 
+  const authHeaders = () => ({
+    'Authorization': `Bearer ${localStorage.getItem('token')}`
+  });
+
+  // Si el token expiró o es inválido, cerrar sesión localmente
+  const handleUnauthorized = () => {
+    localStorage.removeItem('token');
+    setIsLoggedIn(false);
+    setView('login');
+    setMessage({ text: 'Tu sesión expiró, inicia sesión de nuevo', type: 'error' });
+  };
+
+  const fetchStudents = () => {
+    fetch(`${API_URL}/students`, { headers: authHeaders() })
+      .then(res => {
+        if (res.status === 401) {
+          handleUnauthorized();
+          return [];
+        }
+        return res.json();
+      })
+      .then(data => setStudents(Array.isArray(data) ? data : []))
+      .catch(err => console.error(err));
+  };
+
   useEffect(() => {
     fetch(`${API_URL}/careers`)
       .then(res => res.json())
       .then(data => setCareers(data))
       .catch(err => console.error(err));
-      
+
     if (isLoggedIn && view === 'dashboard') {
       fetchStudents();
     }
   }, [isLoggedIn, view]);
-
-  const fetchStudents = () => {
-    fetch(`${API_URL}/students`)
-      .then(res => res.json())
-      .then(data => setStudents(data))
-      .catch(err => console.error(err));
-  };
 
   const handleStudentSubmit = async (e) => {
     e.preventDefault();
@@ -56,7 +74,7 @@ function App() {
         const err = await res.json();
         setMessage({ text: err.error, type: 'error' });
       }
-    } catch (err) {
+    } catch {
       setMessage({ text: 'Error de conexión', type: 'error' });
     }
   };
@@ -78,7 +96,7 @@ function App() {
       } else {
         setMessage({ text: data.error, type: 'error' });
       }
-    } catch (err) {
+    } catch {
       setMessage({ text: 'Error al iniciar sesión', type: 'error' });
     }
   };
@@ -97,14 +115,19 @@ function App() {
     setIsUploading(true);
     try {
       const buffer = await file.arrayBuffer();
-      const parsedData = parseExcelBuffer(buffer);
+      const parsedData = await parseExcelBuffer(buffer);
       
       const res = await fetch(`${API_URL}/students/bulk`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify(parsedData)
       });
-      
+
+      if (res.status === 401) {
+        handleUnauthorized();
+        return;
+      }
+
       const data = await res.json();
       if (res.ok) {
         setMessage({ text: data.message, type: 'success' });
@@ -132,7 +155,7 @@ function App() {
     try {
       const aspirantesBuffer = await aspirantesFile.arrayBuffer();
       const lugaresBuffer = await lugaresFile.arrayBuffer();
-      const generatedData = generateGroupsFromBuffer(aspirantesBuffer, lugaresBuffer);
+      const generatedData = await generateGroupsFromBuffer(aspirantesBuffer, lugaresBuffer);
       await exportToExcel(generatedData);
       setMessage({ text: 'Archivo guardado exitosamente.', type: 'success' });
     } catch (err) {

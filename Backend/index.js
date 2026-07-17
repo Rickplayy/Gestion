@@ -1,6 +1,16 @@
 const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
+
+// Sin JWT_SECRET los tokens serían falsificables: no arrancar sin él.
+if (!process.env.JWT_SECRET) {
+    console.error('FATAL: JWT_SECRET no está definido en .env. El servidor no puede arrancar de forma segura.');
+    process.exit(1);
+}
+if (!process.env.ADMIN_PASS) {
+    console.warn('ADVERTENCIA: ADMIN_PASS no está definido; se usaría una contraseña por defecto insegura al sembrar el admin.');
+}
+
 const createDatabase = require('./db/init');
 const sequelize = require('./config/database');
 const Career = require('./models/Career');
@@ -12,7 +22,9 @@ const bcrypt = require('bcryptjs');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-app.use(cors());
+// CORS restringido al origen del frontend (configurable vía FRONTEND_ORIGIN)
+const allowedOrigin = process.env.FRONTEND_ORIGIN || 'http://localhost:5173';
+app.use(cors({ origin: allowedOrigin }));
 app.use(express.json({ limit: '10mb' }));
 app.use('/api', apiRoutes);
 
@@ -45,6 +57,9 @@ const startServer = async () => {
         const adminCount = await Admin.count();
         if (adminCount === 0) {
             console.log('Seeding default admin...');
+            if (!process.env.ADMIN_PASS) {
+                console.warn('ADVERTENCIA: sembrando admin con contraseña por defecto. Define ADMIN_PASS en .env y cámbiala.');
+            }
             const hashedPassword = await bcrypt.hash(process.env.ADMIN_PASS || 'admin123', 10);
             await Admin.create({
                 username: process.env.ADMIN_USER || 'admin',
