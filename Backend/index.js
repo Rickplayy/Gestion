@@ -41,8 +41,8 @@ const startServer = async () => {
         // 1. Ensure DB exists
         await createDatabase();
 
-        // 2. Sync Models (SAFE MODE - DOES NOT DROP TABLES)
-        await sequelize.sync();
+        // 2. Sync Models (alter agrega columnas nuevas sin borrar tablas ni datos)
+        await sequelize.sync({ alter: true });
         console.log('Database synced.');
 
         // 3. Seed Careers if empty

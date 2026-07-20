@@ -97,13 +97,19 @@ const validateStudent = ({ name, boleta, address }) => {
     return null;
 };
 
-// Register a student (público: formulario de registro)
-router.post('/students', async (req, res) => {
+// Register a student (solo admin: el registro requiere sesión iniciada)
+const VALID_GENDERS = ['Masculino', 'Femenino'];
+
+router.post('/students', auth, async (req, res) => {
     try {
-        const { name, boleta, address, careerId } = req.body;
+        const { name, boleta, address, careerId, gender } = req.body;
 
         const invalid = validateStudent({ name, boleta, address });
         if (invalid) return res.status(400).json({ error: invalid });
+
+        if (gender != null && gender !== '' && !VALID_GENDERS.includes(gender)) {
+            return res.status(400).json({ error: 'Sexo inválido' });
+        }
 
         const career = await Career.findByPk(careerId);
         if (!career) return res.status(400).json({ error: 'Carrera inválida' });
@@ -112,6 +118,7 @@ router.post('/students', async (req, res) => {
             name: name.trim(),
             boleta: boleta.trim(),
             address: address.trim(),
+            gender: gender || null,
             careerId: career.id
         });
         res.status(201).json(student);
@@ -169,18 +176,36 @@ router.post('/students/bulk', auth, async (req, res) => {
             const career = careers.find(c => normalize(c.name) === normalize(record.PROGRAMA_EDUCATIVO));
             const careerId = career ? career.id : (careers[0] ? careers[0].id : null);
 
+            // GENERO viene del Excel como 'F' / 'M' (o ya escrito completo)
+            const generoRaw = String(record.GENERO || '').trim().toUpperCase();
+            let gender = null;
+            if (generoRaw === 'F' || generoRaw === 'FEMENINO') gender = 'Femenino';
+            else if (generoRaw === 'M' || generoRaw === 'MASCULINO') gender = 'Masculino';
+
             newStudents.push({
                 name: String(record.NOMBRE || 'Sin nombre').slice(0, 200),
                 boleta: String(record.BOLETA || `N/A-${Date.now()}-${newStudents.length}`).slice(0, 20),
                 address: String(record.DOMICILIO || 'Sin dirección').slice(0, 500),
+                gender: gender,
                 careerId: careerId
             });
         }
 
-        // ignoreDuplicates: true omite registros con boleta repetida
-        const createdStudents = await Student.bulkCreate(newStudents, { ignoreDuplicates: true });
+        // Postgres no permite que un upsert toque la misma fila dos veces:
+        // si el Excel trae boletas repetidas, se queda la última aparición.
+        const byBoleta = new Map();
+        for (const s of newStudents) byBoleta.set(s.boleta, s);
+        const dedupedStudents = [...byBoleta.values()];
 
-        res.status(201).json({ message: `${createdStudents.length} alumnos procesados exitosamente.` });
+        // Upsert por boleta: si el alumno ya existe se ACTUALIZAN sus datos
+        // (incluido el sexo), en vez de omitirlo. Así recargar el Excel
+        // refresca la tabla de Alumnos.
+        const createdStudents = await Student.bulkCreate(dedupedStudents, {
+            updateOnDuplicate: ['name', 'address', 'gender', 'careerId', 'updatedAt'],
+            conflictAttributes: ['boleta'],
+        });
+
+        res.status(201).json({ message: `${createdStudents.length} alumnos procesados (nuevos y actualizados).` });
     } catch (err) {
         console.error('Error en POST /students/bulk:', err);
         res.status(500).json({ error: 'Error interno del servidor' });

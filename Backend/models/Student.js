@@ -21,6 +21,10 @@ const Student = sequelize.define('Student', {
         type: DataTypes.TEXT,
         allowNull: false,
     },
+    gender: {
+        type: DataTypes.STRING, // 'Masculino' | 'Femenino' | null
+        allowNull: true,
+    },
 });
 
 Student.belongsTo(Career, { foreignKey: 'careerId' });

@@ -1,16 +1,56 @@
 :root {
   --ipn-maroon: #6A1B31;
+  --ipn-maroon-hover: #541426;
   --ipn-gold: #BC955C;
-  --light-gray: #f4f4f4;
-  --white: #ffffff;
-  --text-dark: #333;
+
+  /* Tema claro (default) */
+  --bg: #f4f4f4;
+  --card-bg: #ffffff;
+  --panel-bg: #f9f9f9;
+  --placeholder-bg: #f0f0f0;
+  --text: #333333;
+  --text-muted: #666666;
+  --text-faint: #888888;
+  --border: #dddddd;
+  --border-soft: #eeeeee;
+  --input-bg: #ffffff;
+  --input-border: #cccccc;
+  --row-hover: #f9f9f9;
+  --navbar-bg: #6A1B31;
+  --success-bg: #d4edda;
+  --success-text: #155724;
+  --error-bg: #f8d7da;
+  --error-text: #721c24;
+  --shadow: rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="dark"] {
+  --bg: #16121a;
+  --card-bg: #241e2a;
+  --panel-bg: #2c2533;
+  --placeholder-bg: #292331;
+  --text: #e8e4ec;
+  --text-muted: #b3aabc;
+  --text-faint: #8d8496;
+  --border: #453c50;
+  --border-soft: #383040;
+  --input-bg: #1d1822;
+  --input-border: #574d63;
+  --row-hover: #302938;
+  --navbar-bg: #4a1222;
+  --success-bg: #1e3a28;
+  --success-text: #9fdcb2;
+  --error-bg: #46242a;
+  --error-text: #f0b6bd;
+  --shadow: rgba(0, 0, 0, 0.5);
 }
 
 body {
   margin: 0;
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  background-color: var(--light-gray);
-  color: var(--text-dark);
+  background-color: var(--bg);
+  color: var(--text);
+  transition: background-color 0.25s, color 0.25s;
 }
 
 .app-container {
@@ -21,13 +61,13 @@ body {
 
 /* Navbar */
 .navbar {
-  background-color: var(--ipn-maroon);
+  background-color: var(--navbar-bg);
   color: white;
   padding: 1rem 2rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 4px var(--shadow);
 }
 
 .nav-links button {
@@ -55,10 +95,10 @@ body {
 }
 
 .login-card {
-  background: white;
+  background: var(--card-bg);
   padding: 2rem;
   border-radius: 8px;
-  box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+  box-shadow: 0 4px 10px var(--shadow);
   width: 100%;
   max-width: 400px;
   text-align: center;
@@ -67,6 +107,10 @@ body {
 .login-card h2 {
   color: var(--ipn-maroon);
   margin-bottom: 1.5rem;
+}
+
+[data-theme="dark"] .login-card h2 {
+  color: var(--ipn-gold);
 }
 
 /* Forms */
@@ -84,9 +128,11 @@ body {
 input, select, textarea {
   width: 100%;
   padding: 0.75rem;
-  border: 1px solid #ccc;
+  border: 1px solid var(--input-border);
   border-radius: 4px;
   box-sizing: border-box;
+  background-color: var(--input-bg);
+  color: var(--text);
 }
 
 .btn-primary {
@@ -103,8 +149,31 @@ input, select, textarea {
 }
 
 .btn-primary:hover {
-  background-color: #541426;
+  background-color: var(--ipn-maroon-hover);
 }
+
+.btn-primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Paneles grises del generador */
+.panel {
+  margin-top: 1rem;
+  text-align: left;
+  background: var(--panel-bg);
+  padding: 1rem;
+  border-radius: 8px;
+}
+
+.panel-placeholder {
+  background: var(--placeholder-bg);
+  border: 1px dashed var(--input-border);
+  color: var(--text-muted);
+}
+
+.muted { color: var(--text-muted); }
+.faint { color: var(--text-faint); }
 
 /* Table */
 .dashboard-container {
@@ -116,16 +185,16 @@ input, select, textarea {
 .students-table {
   width: 100%;
   border-collapse: collapse;
-  background: white;
+  background: var(--card-bg);
   border-radius: 8px;
   overflow: hidden;
-  box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+  box-shadow: 0 2px 5px var(--shadow);
 }
 
 .students-table th, .students-table td {
   padding: 1rem;
   text-align: left;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--border-soft);
 }
 
 .students-table th {
@@ -134,7 +203,93 @@ input, select, textarea {
 }
 
 .students-table tr:hover {
-  background-color: #f9f9f9;
+  background-color: var(--row-hover);
+}
+
+/* Recuadro con scroll para la tabla de alumnos */
+.table-scroll {
+  max-height: 65vh;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card-bg);
+  box-shadow: 0 2px 5px var(--shadow);
+}
+
+.table-scroll .students-table {
+  box-shadow: none;
+  border-radius: 0;
+}
+
+/* La cabecera se queda fija al hacer scroll */
+.table-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.search-input {
+  max-width: 340px;
+  display: inline-block;
+}
+
+/* Editor de porcentajes por secuencia */
+.pct-editor summary {
+  cursor: pointer;
+  font-weight: bold;
+  color: var(--ipn-maroon);
+  margin: 0.5rem 0;
+}
+
+[data-theme="dark"] .pct-editor summary {
+  color: var(--ipn-gold);
+}
+
+.pct-scroll {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card-bg);
+}
+
+.pct-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.pct-table th, .pct-table td {
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--border-soft);
+  text-align: left;
+}
+
+.pct-table th {
+  background-color: var(--ipn-maroon);
+  color: white;
+  position: sticky;
+  top: 0;
+}
+
+.pct-table input {
+  width: 70px;
+  padding: 0.3rem;
+}
+
+.btn-outline {
+  margin-top: 0.5rem;
+  background: none;
+  border: 1px solid var(--ipn-maroon);
+  color: var(--ipn-maroon);
+  padding: 0.3rem 0.75rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+[data-theme="dark"] .btn-outline {
+  border-color: var(--ipn-gold);
+  color: var(--ipn-gold);
 }
 
 .status-msg {
@@ -144,5 +299,39 @@ input, select, textarea {
   text-align: center;
 }
 
-.success { background-color: #d4edda; color: #155724; }
-.error { background-color: #f8d7da; color: #721c24; }
+.status-msg .close-btn {
+  float: right;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+}
+
+.success { background-color: var(--success-bg); color: var(--success-text); }
+.error { background-color: var(--error-bg); color: var(--error-text); }
+
+/* Botón flotante de tema (abajo a la derecha) */
+.theme-toggle {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: none;
+  background-color: var(--ipn-maroon);
+  color: white;
+  font-size: 1.5rem;
+  cursor: pointer;
+  box-shadow: 0 4px 12px var(--shadow);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  transition: transform 0.2s, background-color 0.25s;
+}
+
+.theme-toggle:hover {
+  transform: scale(1.1);
+  background-color: var(--ipn-maroon-hover);
+}

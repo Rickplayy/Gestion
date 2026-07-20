@@ -1,14 +1,5 @@
 import { limpiar, readSheetRows, findHeaderRow, getXLSX } from "./excelUtils";
 
-const sequenceMap = {
-  "ADMINISTRACIÓN INDUSTRIAL": ["1AM10", "1AM11", "1AM12", "1AV10", "1AV11", "1AV12", "1AV13"],
-  "CIENCIAS DE LA INFORMÁTICA": ["1CM10", "1CM11", "1CM12", "1CV10", "1CV11", "1CV12"],
-  "INGENIERÍA FERROVIARIA": ["1FM10", "1FV10"],
-  "INGENIERÍA INDUSTRIAL": ["1IM10", "1IM11", "1IM12", "1IM13", "1IV10", "1IV11", "1IV12"],
-  "INGENIERÍA EN INFORMÁTICA": ["1NM10", "1NM11", "1NM12", "1NV10", "1NV11"],
-  "INGENIERÍA EN TRANSPORTE": ["1TM10", "1TM11", "1TV10", "1TV11"],
-};
-
 const normalizeCareer = (name) => {
   const n = String(name || '').toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   if (n.includes('ADMINISTRACION')) return 'ADMINISTRACIÓN INDUSTRIAL';
@@ -28,36 +19,85 @@ const getTurnoFromSequence = (seq) => {
   return 'Indefinido';
 };
 
-async function extractLugares(buffer) {
-  if (!buffer) return {};
+// Lee el archivo "Secuencias primer semestre XX-X.xlsx".
+// Estructura esperada: TURNO | SECUENCIA | CARRERA (con prefijo "A-") | CUPO
+// Regresa [{ secuencia, turno, carrera, cupo }] en el orden del archivo.
+// Se exporta también para que la UI pueda listar las secuencias y ofrecer
+// el editor de porcentajes por secuencia.
+export async function extractSecuencias(buffer) {
   const rows = await readSheetRows(buffer);
 
-  const map = {};
-  for (const row of rows) {
-    if (!row || row.length < 2) continue;
-    const key = String(row[0]).trim();
-    const val = parseInt(row[1], 10);
-    if (!isNaN(val) && key !== 'Etiquetas de fila' && !key.toLowerCase().includes('total')) {
-      map[normalizeCareer(key)] = val;
-    }
+  const headerRowIndex = findHeaderRow(rows, ["TURNO", "SECUENCIA", "CUPO"]);
+  if (headerRowIndex === -1) {
+    throw new Error("El archivo de Secuencias no tiene las columnas TURNO, SECUENCIA, CARRERA y CUPO");
   }
-  return map;
+
+  const secuencias = [];
+  for (let i = headerRowIndex + 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row || row.length < 4) continue;
+
+    const secuencia = limpiar(row[1]).toUpperCase();
+    const cupo = parseInt(limpiar(row[3]), 10);
+    if (!secuencia || isNaN(cupo) || cupo <= 0) continue;
+
+    // La carrera viene con prefijo de letra ("A-ADMINISTRACION INDUSTRIAL")
+    const carreraRaw = limpiar(row[2]).replace(/^[A-Z]\s*-\s*/i, '');
+
+    secuencias.push({
+      secuencia,
+      turno: limpiar(row[0]) || getTurnoFromSequence(secuencia),
+      carrera: normalizeCareer(carreraRaw),
+      cupo,
+    });
+  }
+
+  if (secuencias.length === 0) {
+    throw new Error("No se encontraron secuencias válidas en el archivo");
+  }
+  return secuencias;
 }
 
-export async function generateGroupsFromBuffer(aspirantesBuffer, lugaresBuffer) {
-  const lugaresMap = await extractLugares(lugaresBuffer);
+// ---------------------------------------------------------------------------
+// PENDIENTE (API de kilómetros):
+// Aquí se conectará la API que calcula la distancia (Kms) del domicilio de
+// cada aspirante a la escuela. Con esa distancia se definirá la preferencia
+// de turno: entre más lejos viva, mayor prioridad para turno Matutino (AM).
+//
+// Cuando la API exista:
+//   1. Implementar la llamada dentro de enrichWithKms (recibe la lista de
+//      aspirantes con su campo `domicilio` y debe llenar `kms`).
+//   2. En generateGroupsFromBuffer, al repartir entre secuencias AM/PM,
+//      ordenar por `kms` descendente para dar preferencia AM a los lejanos.
+// ---------------------------------------------------------------------------
+async function enrichWithKms(aspirantes) {
+  // Por ahora la distancia queda en 0 para todos.
+  return aspirantes.map(a => ({ ...a, kms: 0 }));
+}
+
+/**
+ * Genera la asignación de grupos.
+ *
+ * @param aspirantesBuffer  Excel de aspirantes (Nuevo-ingreso-261.xlsx)
+ * @param secuenciasBuffer  Excel de secuencias con cupos (Secuencias primer semestre 26-2.xlsx)
+ * @param options
+ *   - defaultWomenPct: % de mujeres por secuencia (default 50; hombres = 100 - mujeres)
+ *   - womenPctBySeq:   overrides por secuencia, ej. { "1AM10": 60 }
+ */
+export async function generateGroupsFromBuffer(aspirantesBuffer, secuenciasBuffer, options = {}) {
+  const { defaultWomenPct = 50, womenPctBySeq = {} } = options;
+
+  const secuencias = await extractSecuencias(secuenciasBuffer);
 
   const rows = await readSheetRows(aspirantesBuffer, { sheetNameIncludes: 'ASPIRANTES' });
-
   const headerRowIndex = findHeaderRow(rows, ["BOLETA", "NOMBRE"]);
-
-  if (headerRowIndex === -1) throw new Error("No se encontró la cabecera en el Excel");
+  if (headerRowIndex === -1) throw new Error("No se encontró la cabecera en el Excel de aspirantes");
 
   const recordsByCareer = {};
 
   for (let i = headerRowIndex + 1; i < rows.length; i++) {
     const row = rows[i];
-    if (!row || row.length < 5) continue; // Skip empty rows
+    if (!row || row.length < 5) continue;
 
     const boleta = limpiar(row[0]);
     if (!boleta) continue;
@@ -66,16 +106,27 @@ export async function generateGroupsFromBuffer(aspirantesBuffer, lugaresBuffer) 
     const generoRaw = limpiar(row[7]).toUpperCase();
     const trueGenero = generoRaw === 'F' ? 'Mujer' : 'Hombre';
 
-    const programaRaw = limpiar(row[9]);
-    const carrera = normalizeCareer(programaRaw);
-    
+    const carrera = normalizeCareer(limpiar(row[9]));
     const promedio = parseFloat(limpiar(row[15])) || 0;
+    const domicilio = limpiar(row[4]); // lo usará la API de kms
 
-    if (!recordsByCareer[carrera]) {
-      recordsByCareer[carrera] = { all: [] };
-    }
+    if (!recordsByCareer[carrera]) recordsByCareer[carrera] = [];
+    recordsByCareer[carrera].push({ boleta, nombre, carrera, genero: trueGenero, promedio, domicilio });
+  }
 
-    recordsByCareer[carrera].all.push({ boleta, nombre, carrera, genero: trueGenero, promedio });
+  // Agrupar secuencias por carrera (matutino primero, como preferencia)
+  const seqsByCareer = {};
+  for (const s of secuencias) {
+    if (!seqsByCareer[s.carrera]) seqsByCareer[s.carrera] = [];
+    seqsByCareer[s.carrera].push(s);
+  }
+  for (const carrera in seqsByCareer) {
+    seqsByCareer[carrera].sort((a, b) => {
+      const isAM = a.secuencia[2] === 'M' ? 0 : 1;
+      const isBM = b.secuencia[2] === 'M' ? 0 : 1;
+      if (isAM !== isBM) return isAM - isBM;
+      return a.secuencia.localeCompare(b.secuencia);
+    });
   }
 
   const finalAssignments = [];
@@ -88,99 +139,121 @@ export async function generateGroupsFromBuffer(aspirantesBuffer, lugaresBuffer) 
       Turno: getTurnoFromSequence(seq),
       Genero: student.genero,
       Promedio: student.promedio,
-      Kms: 0,
-      Secuencia: seq
+      Kms: student.kms ?? 0,
+      Secuencia: seq,
     });
   };
 
   for (const carrera in recordsByCareer) {
-    // Ordenar de mayor a menor promedio
-    const todosOrdenados = recordsByCareer[carrera].all.sort((a, b) => b.promedio - a.promedio);
-    
-    // Limitar cupo según el archivo de lugares (si existe en el mapa)
-    const cupo = lugaresMap[carrera] || todosOrdenados.length;
-    const admitidos = todosOrdenados.slice(0, cupo);
+    const seqs = seqsByCareer[carrera];
+    if (!seqs || seqs.length === 0) continue; // carrera sin secuencias en el archivo
 
-    // Separar por género para la lógica del 60%
+    // Ordenar de mayor a menor promedio y admitir hasta el cupo total
+    const ordenados = recordsByCareer[carrera].sort((a, b) => b.promedio - a.promedio);
+    const cupoTotal = seqs.reduce((sum, s) => sum + s.cupo, 0);
+    let admitidos = ordenados.slice(0, cupoTotal);
+
+    // Hueco para la API de kms (hoy no cambia nada; ver nota arriba)
+    admitidos = await enrichWithKms(admitidos);
+
     const mujeres = admitidos.filter(s => s.genero === 'Mujer');
     const hombres = admitidos.filter(s => s.genero === 'Hombre');
-    
-    const sequences = sequenceMap[carrera] || [];
-    if (sequences.length === 0) continue;
+    const totalAdmitidos = admitidos.length;
 
-    const totalStudents = mujeres.length + hombres.length;
-    const capacityPerSeq = Math.ceil(totalStudents / sequences.length);
-    
-    // Matutino first
-    const sortedSequences = [...sequences].sort((a, b) => {
-      const isAM = a[2] === 'M' ? 0 : 1;
-      const isBM = b[2] === 'M' ? 0 : 1;
-      if (isAM !== isBM) return isAM - isBM;
-      return a.localeCompare(b);
-    });
+    // Repartir proporcionalmente al cupo de cada secuencia
+    for (let i = 0; i < seqs.length; i++) {
+      const { secuencia, cupo } = seqs[i];
+      const esUltima = i === seqs.length - 1;
 
-    for (const seq of sortedSequences) {
-      const womenQuota = Math.ceil(capacityPerSeq * 0.60);
-      let assignedCount = 0;
+      // La última secuencia absorbe lo que quede (evita perder gente por redondeos)
+      let target = esUltima
+        ? mujeres.length + hombres.length
+        : Math.min(cupo, Math.round(totalAdmitidos * (cupo / cupoTotal)));
+      if (esUltima) target = Math.min(target, cupo + seqs.length); // margen pequeño por redondeo
 
-      // Assign women up to quota
-      while (assignedCount < womenQuota && mujeres.length > 0) {
-        asignar(mujeres.shift(), seq);
-        assignedCount++;
+      const pct = womenPctBySeq[secuencia] ?? defaultWomenPct;
+      const womenQuota = Math.round(target * (pct / 100));
+      let assigned = 0;
+
+      // Mujeres hasta su cuota
+      while (assigned < womenQuota && mujeres.length > 0) {
+        asignar(mujeres.shift(), secuencia);
+        assigned++;
       }
-
-      // Assign men to fill the rest of the capacity
-      while (assignedCount < capacityPerSeq && hombres.length > 0) {
-        asignar(hombres.shift(), seq);
-        assignedCount++;
+      // Hombres para completar
+      while (assigned < target && hombres.length > 0) {
+        asignar(hombres.shift(), secuencia);
+        assigned++;
       }
-
-      // If we still have space but men are out, fill with remaining women
-      while (assignedCount < capacityPerSeq && mujeres.length > 0) {
-        asignar(mujeres.shift(), seq);
-        assignedCount++;
+      // Si faltan hombres, completar con mujeres
+      while (assigned < target && mujeres.length > 0) {
+        asignar(mujeres.shift(), secuencia);
+        assigned++;
       }
     }
 
-    // If any students left (due to rounding errors), put them in the last sequence
-    const lastSeq = sortedSequences[sortedSequences.length - 1];
+    // Sobrantes por redondeo → última secuencia
+    const lastSeq = seqs[seqs.length - 1].secuencia;
     while (mujeres.length > 0) asignar(mujeres.shift(), lastSeq);
     while (hombres.length > 0) asignar(hombres.shift(), lastSeq);
   }
 
   if (finalAssignments.length === 0) {
-    throw new Error("No se encontraron registros válidos para procesar. Asegúrate de que el archivo no esté vacío y contenga los encabezados correctos.");
+    throw new Error("No se encontraron registros válidos para procesar. Revisa que los archivos tengan el formato esperado.");
   }
 
   return finalAssignments;
 }
 
-export async function exportToExcel(data, defaultFilename = 'gruposAsignados31secuencias.xlsx') {
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+// Abre el diálogo "Guardar como" para que el usuario elija nombre y ubicación.
+// DEBE llamarse directamente en el click (antes de procesar los archivos):
+// si se llama después de un procesamiento largo, el navegador invalida el
+// gesto del usuario y la escritura falla dejando un .xlsx vacío/dañado.
+// Regresa: fileHandle | { cancelled: true } | null (navegador sin soporte).
+export async function pickSaveFile(defaultFilename = 'gruposAsignados.xlsx') {
+  if (!window.showSaveFilePicker) return null;
+  try {
+    return await window.showSaveFilePicker({
+      suggestedName: defaultFilename,
+      types: [{
+        description: 'Excel Workbook',
+        accept: { [XLSX_MIME]: ['.xlsx'] },
+      }],
+    });
+  } catch (err) {
+    if (err.name === 'AbortError') return { cancelled: true };
+    throw err;
+  }
+}
+
+// Escribe el Excel. Si hay fileHandle (elegido con pickSaveFile) escribe ahí;
+// si no, descarga clásica del navegador con el nombre sugerido.
+export async function exportToExcel(data, defaultFilename = 'gruposAsignados.xlsx', fileHandle = null) {
   const XLSX = await getXLSX();
   const ws = XLSX.utils.json_to_sheet(data);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Grupos Asignados");
-  
-  if (window.showSaveFilePicker) {
-    try {
-      const fileHandle = await window.showSaveFilePicker({
-        suggestedName: defaultFilename,
-        types: [{
-          description: 'Excel Workbook',
-          accept: {'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx']},
-        }],
-      });
-      const writable = await fileHandle.createWritable();
-      const excelBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-      await writable.write(excelBuffer);
-      await writable.close();
-    } catch (err) {
-      if (err.name !== 'AbortError') {
-        console.error('Error guardando el archivo:', err);
-      }
-    }
-  } else {
-    // Fallback normal si el navegador no lo soporta
-    XLSX.writeFile(wb, defaultFilename);
+
+  const bytes = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([bytes], { type: XLSX_MIME });
+
+  if (fileHandle) {
+    const writable = await fileHandle.createWritable();
+    await writable.write(blob);
+    await writable.close();
+    return fileHandle.name;
   }
+
+  // Fallback: descarga normal (el navegador decide la carpeta de descargas)
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = defaultFilename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  return defaultFilename;
 }
