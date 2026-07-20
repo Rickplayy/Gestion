@@ -14,7 +14,6 @@ function App() {
   // Form States
   const [studentForm, setStudentForm] = useState({ name: '', boleta: '', careerId: '', address: '', gender: '' });
   const [loginForm, setLoginForm] = useState({ username: '', password: '' });
-  const fileInputRef = useRef(null);
   const fileGeneratorRef = useRef(null);
   const fileSecuenciasRef = useRef(null);
   const [aspirantesFile, setAspirantesFile] = useState(null);
@@ -22,7 +21,7 @@ function App() {
   const [secuenciasList, setSecuenciasList] = useState([]);
   const [defaultWomenPct, setDefaultWomenPct] = useState(50);
   const [womenPctBySeq, setWomenPctBySeq] = useState({});
-  const [isUploading, setIsUploading] = useState(false);
+  const [isSyncingAspirantes, setIsSyncingAspirantes] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'light');
 
@@ -124,11 +123,16 @@ function App() {
     setMessage({ text: 'Sesión cerrada', type: 'success' });
   };
 
-  const handleFileUpload = async (e) => {
+  // Al seleccionar el archivo de Aspirantes (Nuevo-ingreso.xlsx) en el
+  // Generador: se guarda el archivo para la generación de grupos Y se sincroniza
+  // su resumen (nombre, boleta, sexo, carrera, domicilio) a la tabla de Alumnos.
+  // El apartado Alumnos es solo lectura; sus datos vienen de aquí.
+  const handleAspirantesSelect = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    setAspirantesFile(file);
 
-    setIsUploading(true);
+    setIsSyncingAspirantes(true);
     try {
       const buffer = await file.arrayBuffer();
       const parsedData = await parseExcelBuffer(buffer);
@@ -146,17 +150,16 @@ function App() {
 
       const data = await res.json();
       if (res.ok) {
-        setMessage({ text: data.message, type: 'success' });
-        fetchStudents(); // Refresh list
+        setMessage({ text: `Aspirantes cargados. ${data.message} Ya se ven en el apartado Alumnos.`, type: 'success' });
+        fetchStudents();
       } else {
-        setMessage({ text: data.error || 'Error al importar excel', type: 'error' });
+        setMessage({ text: data.error || 'Error al procesar el archivo de aspirantes', type: 'error' });
       }
     } catch (err) {
       console.error(err);
       setMessage({ text: 'Error procesando el archivo: ' + err.message, type: 'error' });
     } finally {
-      setIsUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
+      setIsSyncingAspirantes(false);
     }
   };
 
@@ -313,26 +316,11 @@ function App() {
 
         {view === 'dashboard' && isLoggedIn && (
           <div className="dashboard-container">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
-              <h2>Listado de Alumnos Registrados</h2>
-              <div>
-                <input
-                  type="file"
-                  accept=".xlsx, .xls"
-                  ref={fileInputRef}
-                  style={{ display: 'none' }}
-                  onChange={handleFileUpload}
-                />
-                <button
-                  className="btn-primary"
-                  style={{ marginTop: 0 }}
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isUploading}
-                >
-                  {isUploading ? 'Procesando...' : 'Importar Excel'}
-                </button>
-              </div>
-            </div>
+            <h2>Listado de Alumnos</h2>
+            <p className="muted" style={{ marginTop: '-0.5rem' }}>
+              Resumen de los datos del archivo Nuevo-ingreso.xlsx. Para cargar o actualizar
+              estos datos, sube el archivo de aspirantes en <strong>Generador Grupos</strong>.
+            </p>
 
             <div style={{ margin: '1rem 0' }}>
               <input
@@ -390,14 +378,17 @@ function App() {
               <div className="panel">
                 <div style={{ marginBottom: '1rem' }}>
                   <strong>1. Archivo de Aspirantes Inscritos</strong> (ej. Nuevo-ingreso-261.xlsx)<br/>
+                  <span className="muted" style={{ fontSize: '0.8rem' }}>Al seleccionarlo se actualiza también el apartado Alumnos.</span><br/>
                   <input
                     type="file"
                     accept=".xlsx, .xls"
                     ref={fileGeneratorRef}
                     style={{ display: 'none' }}
-                    onChange={e => setAspirantesFile(e.target.files[0])}
+                    onChange={handleAspirantesSelect}
                   />
-                  <button className="btn-primary" onClick={() => fileGeneratorRef.current?.click()} style={{ width: 'auto', padding: '0.5rem 1rem', marginTop: '0.5rem' }}>Seleccionar</button>
+                  <button className="btn-primary" onClick={() => fileGeneratorRef.current?.click()} disabled={isSyncingAspirantes} style={{ width: 'auto', padding: '0.5rem 1rem', marginTop: '0.5rem' }}>
+                    {isSyncingAspirantes ? 'Cargando...' : 'Seleccionar'}
+                  </button>
                   <span style={{ marginLeft: '1rem', fontSize: '0.9rem' }}>{aspirantesFile ? aspirantesFile.name : 'Ningún archivo seleccionado'}</span>
                 </div>
 
