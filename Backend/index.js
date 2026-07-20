@@ -68,36 +68,11 @@ const startServer = async () => {
             console.log('Admin seeded.');
         }
 
-        // 5. Seed 30 Mock Students if empty
-        const studentCount = await Student.count();
-        if (studentCount === 0) {
-            console.log('Seeding 30 mock students...');
-            const careers = await Career.findAll();
-            if (careers.length > 0) {
-                const firstNames = ['Juan', 'María', 'Roberto', 'Ana', 'Carlos', 'Elena', 'Diego', 'Lucía', 'Fernando', 'Sofía'];
-                const lastNames = ['Pérez', 'García', 'Martínez', 'Rodríguez', 'López', 'Hernández', 'Sánchez', 'Ramírez', 'Torres', 'Flores'];
-                const streets = ['Av. Juan de Dios Bátiz', 'Calle 5 de Mayo', 'Lindavista', 'Insurgentes Sur', 'Reforma', 'Eje Central', 'Churubusco', 'Tlalpan'];
-                
-                const mockStudents = [];
-                for (let i = 1; i <= 30; i++) {
-                    const firstName = firstNames[Math.floor(Math.random() * firstNames.length)];
-                    const lastName = lastNames[Math.floor(Math.random() * lastNames.length)];
-                    const street = streets[Math.floor(Math.random() * streets.length)];
-                    const career = careers[Math.floor(Math.random() * careers.length)];
-                    
-                    mockStudents.push({
-                        name: `${firstName} ${lastName}`,
-                        boleta: `202360${i.toString().padStart(4, '0')}`,
-                        address: `${street} #${Math.floor(Math.random() * 500) + 1}, CDMX`,
-                        careerId: career.id
-                    });
-                }
-                await Student.bulkCreate(mockStudents);
-                console.log('30 mock students seeded.');
-            }
-        }
+        // Los alumnos se cargan desde el Excel Nuevo-ingreso.xlsx (Generador de
+        // Grupos); no se siembran alumnos de prueba para que la tabla de Alumnos
+        // refleje exactamente el archivo importado.
 
-        // 6. Start App
+        // 5. Start App
         app.listen(PORT, () => {
             console.log(`Server running on http://localhost:${PORT}`);
         });

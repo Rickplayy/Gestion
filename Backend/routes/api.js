@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const sequelize = require('../config/database');
 const Career = require('../models/Career');
 const Student = require('../models/Student');
 const Admin = require('../models/Admin');
@@ -119,7 +120,8 @@ router.post('/students', auth, async (req, res) => {
             boleta: boleta.trim(),
             address: address.trim(),
             gender: gender || null,
-            careerId: career.id
+            careerId: career.id,
+            source: 'manual'
         });
         res.status(201).json(student);
     } catch (err) {
@@ -182,30 +184,39 @@ router.post('/students/bulk', auth, async (req, res) => {
             if (generoRaw === 'F' || generoRaw === 'FEMENINO') gender = 'Femenino';
             else if (generoRaw === 'M' || generoRaw === 'MASCULINO') gender = 'Masculino';
 
+            // Identidad estable: algunos aspirantes aún no tienen boleta asignada.
+            // Se usa la CURP (siempre presente y única) para no generar duplicados
+            // nuevos en cada importación. Si tampoco hubiera CURP, se descarta.
+            const boletaRaw = String(record.BOLETA || '').trim();
+            const curp = String(record.CURP || '').trim();
+            const identidad = boletaRaw || (curp ? `SB-${curp}` : '');
+            if (!identidad) continue;
+
             newStudents.push({
                 name: String(record.NOMBRE || 'Sin nombre').slice(0, 200),
-                boleta: String(record.BOLETA || `N/A-${Date.now()}-${newStudents.length}`).slice(0, 20),
+                boleta: identidad.slice(0, 40),
                 address: String(record.DOMICILIO || 'Sin dirección').slice(0, 500),
                 gender: gender,
-                careerId: careerId
+                careerId: careerId,
+                source: 'excel'
             });
         }
 
-        // Postgres no permite que un upsert toque la misma fila dos veces:
-        // si el Excel trae boletas repetidas, se queda la última aparición.
+        // Deduplicar por boleta dentro del mismo archivo (la última gana)
         const byBoleta = new Map();
         for (const s of newStudents) byBoleta.set(s.boleta, s);
         const dedupedStudents = [...byBoleta.values()];
 
-        // Upsert por boleta: si el alumno ya existe se ACTUALIZAN sus datos
-        // (incluido el sexo), en vez de omitirlo. Así recargar el Excel
-        // refresca la tabla de Alumnos.
-        const createdStudents = await Student.bulkCreate(dedupedStudents, {
-            updateOnDuplicate: ['name', 'address', 'gender', 'careerId', 'updatedAt'],
-            conflictAttributes: ['boleta'],
+        // La tabla de Alumnos es un RESUMEN del Excel: se reemplaza por completo
+        // el set importado (source='excel') para que coincida exactamente con el
+        // archivo, sin acumular datos viejos. Los registros manuales se conservan.
+        // Todo dentro de una transacción para no dejar la tabla a medias.
+        await sequelize.transaction(async (t) => {
+            await Student.destroy({ where: { source: 'excel' }, transaction: t });
+            await Student.bulkCreate(dedupedStudents, { transaction: t });
         });
 
-        res.status(201).json({ message: `${createdStudents.length} alumnos procesados (nuevos y actualizados).` });
+        res.status(201).json({ message: `${dedupedStudents.length} alumnos cargados del Excel.` });
     } catch (err) {
         console.error('Error en POST /students/bulk:', err);
         res.status(500).json({ error: 'Error interno del servidor' });
