@@ -67,7 +67,20 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
   box-shadow: 0 2px 4px var(--shadow);
+}
+
+.logo {
+  font-weight: bold;
+}
+
+.nav-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
 }
 
 .nav-links button {
@@ -75,10 +88,10 @@ body {
   border: 1px solid white;
   color: white;
   padding: 0.5rem 1rem;
-  margin-left: 1rem;
   cursor: pointer;
   border-radius: 4px;
   transition: all 0.3s;
+  white-space: nowrap;
 }
 
 .nav-links button:hover, .nav-links button.active {
@@ -334,4 +347,92 @@ input, select, textarea {
 .theme-toggle:hover {
   transform: scale(1.1);
   background-color: var(--ipn-maroon-hover);
+}
+
+/* ===== Responsive ===== */
+
+/* Tablets y pantallas medianas */
+@media (max-width: 768px) {
+  .navbar {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 0.85rem 1rem;
+  }
+
+  .logo {
+    text-align: center;
+    margin-bottom: 0.25rem;
+  }
+
+  /* Los botones se reparten en fila y bajan de renglón sin encimarse */
+  .nav-links {
+    justify-content: center;
+  }
+
+  .nav-links button {
+    flex: 1 1 auto;
+    min-width: 0;
+    text-align: center;
+  }
+
+  .dashboard-container {
+    padding: 1.25rem 1rem;
+  }
+
+  .login-card {
+    padding: 1.5rem;
+  }
+
+  .table-scroll {
+    max-height: 60vh;
+  }
+}
+
+/* Celulares */
+@media (max-width: 480px) {
+  .navbar {
+    padding: 0.75rem 0.75rem;
+  }
+
+  .logo {
+    font-size: 1rem;
+  }
+
+  /* Dos botones por renglón en pantallas angostas */
+  .nav-links button {
+    flex: 1 1 calc(50% - 0.5rem);
+    padding: 0.5rem 0.5rem;
+    font-size: 0.9rem;
+  }
+
+  .dashboard-container {
+    padding: 1rem 0.75rem;
+  }
+
+  /* El buscador ocupa todo el ancho y el contador baja debajo */
+  .search-input {
+    max-width: 100%;
+    display: block;
+  }
+
+  .search-count {
+    display: block;
+    margin: 0.5rem 0 0 !important;
+  }
+
+  /* Tablas con celdas más compactas para que quepan */
+  .students-table th,
+  .students-table td {
+    padding: 0.6rem 0.5rem;
+    font-size: 0.85rem;
+  }
+
+  /* El botón flotante de tema no invade el contenido */
+  .theme-toggle {
+    bottom: 1rem;
+    right: 1rem;
+    width: 46px;
+    height: 46px;
+    font-size: 1.25rem;
+  }
 }

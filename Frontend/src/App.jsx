@@ -330,7 +330,7 @@ function App() {
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
               />
-              <span className="muted" style={{ marginLeft: '1rem', fontSize: '0.9rem' }}>
+              <span className="muted search-count" style={{ marginLeft: '1rem', fontSize: '0.9rem' }}>
                 {filteredStudents.length} de {students.length} alumnos
               </span>
             </div>
@@ -377,7 +377,7 @@ function App() {
 
               <div className="panel">
                 <div style={{ marginBottom: '1rem' }}>
-                  <strong>1. Archivo de Aspirantes Inscritos</strong> (ej. Nuevo-ingreso-261.xlsx)<br/>
+                  <strong>1. Archivo de Aspirantes Inscritos</strong><br/>
                   <span className="muted" style={{ fontSize: '0.8rem' }}>Al seleccionarlo se actualiza también el apartado Alumnos.</span><br/>
                   <input
                     type="file"
@@ -393,7 +393,7 @@ function App() {
                 </div>
 
                 <div>
-                  <strong>2. Archivo de Secuencias con cupos</strong> (ej. Secuencias primer semestre 26-2.xlsx)<br/>
+                  <strong>2. Archivo de Secuencias con cupos</strong><br/>
                   <input
                     type="file"
                     accept=".xlsx, .xls"
