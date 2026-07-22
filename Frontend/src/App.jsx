@@ -1,19 +1,63 @@
 import { useState, useEffect, useRef } from 'react';
 import { parseExcelBuffer } from './utils/excelParser';
-import { generateGroupsFromBuffer, exportToExcel, extractSecuencias, pickSaveFile } from './utils/groupGenerator';
+import {
+  generateGroupsFromBuffer,
+  exportToExcel,
+  extractSecuencias,
+  pickSaveFile,
+  normalizeCareer,
+} from './utils/groupGenerator';
 import './App.css';
 
+// Carreras disponibles para el registro manual. Ya no vienen de la base de
+// datos: la app funciona 100% en el navegador y sin persistencia.
+const CAREERS = [
+  'Ingeniería en Informática',
+  'Ciencias de la Informática',
+  'Ingeniería Ferroviaria',
+  'Ingeniería Industrial',
+  'Administración Industrial',
+];
+
+// Convierte los registros crudos del Excel de aspirantes a filas de la tabla
+// de Alumnos (nombre, boleta, sexo, carrera, dirección). Deduplica por boleta.
+const mapAspirantesToStudents = (parsed) => {
+  const byBoleta = new Map();
+  for (const r of parsed) {
+    const generoRaw = String(r.GENERO || '').trim().toUpperCase();
+    let gender = '—';
+    if (generoRaw === 'F' || generoRaw === 'FEMENINO') gender = 'Femenino';
+    else if (generoRaw === 'M' || generoRaw === 'MASCULINO') gender = 'Masculino';
+
+    // Algunos aspirantes aún no tienen boleta: se usa la CURP como identidad.
+    const boletaRaw = String(r.BOLETA || '').trim();
+    const curp = String(r.CURP || '').trim();
+    const identidad = boletaRaw || (curp ? `SB-${curp}` : '');
+    if (!identidad) continue;
+
+    byBoleta.set(identidad, {
+      id: identidad,
+      name: String(r.NOMBRE || 'Sin nombre').trim(),
+      boleta: identidad,
+      gender,
+      career: normalizeCareer(r.PROGRAMA_EDUCATIVO),
+      address: String(r.DOMICILIO || 'Sin dirección').trim(),
+    });
+  }
+  return [...byBoleta.values()];
+};
+
 function App() {
-  const [view, setView] = useState(() => localStorage.getItem('token') ? 'dashboard' : 'login');
-  const [isLoggedIn, setIsLoggedIn] = useState(!!localStorage.getItem('token'));
-  const [careers, setCareers] = useState([]);
+  // La app abre directo en el generador (sin inicio de sesión).
+  const [view, setView] = useState('generator');
+  // Los alumnos viven solo en memoria: al recargar la página se empieza de 0.
   const [students, setStudents] = useState([]);
   const [message, setMessage] = useState({ text: '', type: '' });
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Form States
-  const [studentForm, setStudentForm] = useState({ name: '', boleta: '', careerId: '', address: '', gender: '' });
-  const [loginForm, setLoginForm] = useState({ username: '', password: '' });
+  // Formulario de registro manual
+  const [studentForm, setStudentForm] = useState({ name: '', boleta: '', career: '', address: '', gender: '' });
+
   const fileGeneratorRef = useRef(null);
   const fileSecuenciasRef = useRef(null);
   const [aspirantesFile, setAspirantesFile] = useState(null);
@@ -25,108 +69,45 @@ function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'light');
 
-  // Aplicar el tema al documento y recordarlo
+  // Aplicar el tema al documento y recordarlo (única preferencia que se guarda)
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem('theme', theme);
   }, [theme]);
 
-  const API_URL = 'http://localhost:3001/api';
-
-  const authHeaders = () => ({
-    'Authorization': `Bearer ${localStorage.getItem('token')}`
-  });
-
-  // Si el token expiró o es inválido, cerrar sesión localmente
-  const handleUnauthorized = () => {
-    localStorage.removeItem('token');
-    setIsLoggedIn(false);
-    setView('login');
-    setMessage({ text: 'Tu sesión expiró, inicia sesión de nuevo', type: 'error' });
-  };
-
-  const fetchStudents = () => {
-    fetch(`${API_URL}/students`, { headers: authHeaders() })
-      .then(res => {
-        if (res.status === 401) {
-          handleUnauthorized();
-          return [];
-        }
-        return res.json();
-      })
-      .then(data => setStudents(Array.isArray(data) ? data : []))
-      .catch(err => console.error(err));
-  };
-
-  useEffect(() => {
-    fetch(`${API_URL}/careers`)
-      .then(res => res.json())
-      .then(data => setCareers(data))
-      .catch(err => console.error(err));
-
-    if (isLoggedIn && view === 'dashboard') {
-      fetchStudents();
-    }
-  }, [isLoggedIn, view]);
-
-  const handleStudentSubmit = async (e) => {
+  const handleStudentSubmit = (e) => {
     e.preventDefault();
-    try {
-      const res = await fetch(`${API_URL}/students`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify(studentForm)
-      });
-      if (res.status === 401) {
-        handleUnauthorized();
-        return;
-      }
-      if (res.ok) {
-        setMessage({ text: 'Alumno registrado con éxito', type: 'success' });
-        setStudentForm({ name: '', boleta: '', careerId: '', address: '', gender: '' });
-        fetchStudents(); // Reflejar el registro en el apartado Alumnos
-      } else {
-        const err = await res.json();
-        setMessage({ text: err.error, type: 'error' });
-      }
-    } catch {
-      setMessage({ text: 'Error de conexión', type: 'error' });
+    const name = studentForm.name.trim();
+    const boleta = studentForm.boleta.trim();
+    const address = studentForm.address.trim();
+
+    if (!name || !boleta || !address || !studentForm.career || !studentForm.gender) {
+      setMessage({ text: 'Completa todos los campos.', type: 'error' });
+      return;
     }
-  };
-
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    try {
-      const res = await fetch(`${API_URL}/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(loginForm)
-      });
-      const data = await res.json();
-      if (res.ok) {
-        localStorage.setItem('token', data.token);
-        setIsLoggedIn(true);
-        setView('dashboard');
-        setMessage({ text: 'Bienvenido, Administrador', type: 'success' });
-      } else {
-        setMessage({ text: data.error, type: 'error' });
-      }
-    } catch {
-      setMessage({ text: 'Error al iniciar sesión', type: 'error' });
+    if (students.some(s => s.boleta === boleta)) {
+      setMessage({ text: 'Esa boleta ya está registrada.', type: 'error' });
+      return;
     }
+
+    setStudents(prev => [
+      {
+        id: `manual-${Date.now()}`,
+        name,
+        boleta,
+        gender: studentForm.gender,
+        career: studentForm.career,
+        address,
+      },
+      ...prev,
+    ]);
+    setStudentForm({ name: '', boleta: '', career: '', address: '', gender: '' });
+    setMessage({ text: 'Alumno registrado con éxito.', type: 'success' });
   };
 
-  const logout = () => {
-    localStorage.removeItem('token');
-    setIsLoggedIn(false);
-    setView('login');
-    setMessage({ text: 'Sesión cerrada', type: 'success' });
-  };
-
-  // Al seleccionar el archivo de Aspirantes (Nuevo-ingreso.xlsx) en el
-  // Generador: se guarda el archivo para la generación de grupos Y se sincroniza
-  // su resumen (nombre, boleta, sexo, carrera, domicilio) a la tabla de Alumnos.
-  // El apartado Alumnos es solo lectura; sus datos vienen de aquí.
+  // Al seleccionar el archivo de Aspirantes se parsea en el navegador y su
+  // resumen (nombre, boleta, sexo, carrera, domicilio) llena el apartado
+  // Alumnos. Todo en memoria: no se guarda en ninguna base de datos.
   const handleAspirantesSelect = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -136,25 +117,9 @@ function App() {
     try {
       const buffer = await file.arrayBuffer();
       const parsedData = await parseExcelBuffer(buffer);
-
-      const res = await fetch(`${API_URL}/students/bulk`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify(parsedData)
-      });
-
-      if (res.status === 401) {
-        handleUnauthorized();
-        return;
-      }
-
-      const data = await res.json();
-      if (res.ok) {
-        setMessage({ text: `Aspirantes cargados. ${data.message} Ya se ven en el apartado Alumnos.`, type: 'success' });
-        fetchStudents();
-      } else {
-        setMessage({ text: data.error || 'Error al procesar el archivo de aspirantes', type: 'error' });
-      }
+      const mapped = mapAspirantesToStudents(parsedData);
+      setStudents(mapped);
+      setMessage({ text: `Aspirantes cargados: ${mapped.length} alumnos. Ya se ven en el apartado Alumnos.`, type: 'success' });
     } catch (err) {
       console.error(err);
       setMessage({ text: 'Error procesando el archivo: ' + err.message, type: 'error' });
@@ -226,53 +191,48 @@ function App() {
     return (
       String(s.name || '').toLowerCase().includes(q) ||
       String(s.boleta || '').toLowerCase().includes(q) ||
-      String(s.Career?.name || '').toLowerCase().includes(q) ||
+      String(s.career || '').toLowerCase().includes(q) ||
       String(s.gender || '').toLowerCase().includes(q)
     );
   });
+
+  const womenPct = clampPct(defaultWomenPct);
 
   return (
     <div className="app-container">
       <nav className="navbar">
         <div className="logo">SISTEMA GESTIÓN IPN</div>
         <div className="nav-links">
-          {!isLoggedIn ? (
-            <button onClick={() => setView('login')} className={view === 'login' ? 'active' : ''}>Admin Login</button>
-          ) : (
-            <>
-              <button onClick={() => setView('dashboard')} className={view === 'dashboard' ? 'active' : ''}>Alumnos</button>
-              <button onClick={() => setView('register')} className={view === 'register' ? 'active' : ''}>Registro</button>
-              <button onClick={() => setView('generator')} className={view === 'generator' ? 'active' : ''}>Generador Grupos</button>
-              <button onClick={logout}>Cerrar Sesión</button>
-            </>
-          )}
+          <button onClick={() => setView('generator')} className={view === 'generator' ? 'active' : ''}>Generador Grupos</button>
+          <button onClick={() => setView('dashboard')} className={view === 'dashboard' ? 'active' : ''}>Alumnos</button>
+          <button onClick={() => setView('register')} className={view === 'register' ? 'active' : ''}>Registro</button>
         </div>
       </nav>
 
       <main>
         {message.text && (
           <div className={`status-msg ${message.type}`}>
-            {message.text}
-            <button className="close-btn" onClick={() => setMessage({text:'', type:''})}>X</button>
+            <span>{message.text}</span>
+            <button className="close-btn" onClick={() => setMessage({ text: '', type: '' })} aria-label="Cerrar">×</button>
           </div>
         )}
 
-        {view === 'register' && isLoggedIn && (
+        {view === 'register' && (
           <div className="dashboard-container">
-            <div className="login-card" style={{maxWidth: '500px', margin: '0 auto'}}>
+            <div className="login-card" style={{ maxWidth: '500px', margin: '0 auto' }}>
               <h2>Registro de Nuevo Alumno</h2>
               <form onSubmit={handleStudentSubmit}>
                 <div className="form-group">
                   <label>Nombre Completo</label>
-                  <input type="text" value={studentForm.name} onChange={e => setStudentForm({...studentForm, name: e.target.value})} required />
+                  <input type="text" value={studentForm.name} onChange={e => setStudentForm({ ...studentForm, name: e.target.value })} required />
                 </div>
                 <div className="form-group">
                   <label>Boleta</label>
-                  <input type="text" value={studentForm.boleta} onChange={e => setStudentForm({...studentForm, boleta: e.target.value})} required />
+                  <input type="text" value={studentForm.boleta} onChange={e => setStudentForm({ ...studentForm, boleta: e.target.value })} required />
                 </div>
                 <div className="form-group">
                   <label>Sexo</label>
-                  <select value={studentForm.gender} onChange={e => setStudentForm({...studentForm, gender: e.target.value})} required>
+                  <select value={studentForm.gender} onChange={e => setStudentForm({ ...studentForm, gender: e.target.value })} required>
                     <option value="">Seleccione sexo</option>
                     <option value="Masculino">Masculino</option>
                     <option value="Femenino">Femenino</option>
@@ -280,14 +240,14 @@ function App() {
                 </div>
                 <div className="form-group">
                   <label>Carrera</label>
-                  <select value={studentForm.careerId} onChange={e => setStudentForm({...studentForm, careerId: e.target.value})} required>
+                  <select value={studentForm.career} onChange={e => setStudentForm({ ...studentForm, career: e.target.value })} required>
                     <option value="">Seleccione carrera</option>
-                    {careers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    {CAREERS.map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
                 <div className="form-group">
                   <label>Dirección</label>
-                  <textarea value={studentForm.address} onChange={e => setStudentForm({...studentForm, address: e.target.value})} required />
+                  <textarea value={studentForm.address} onChange={e => setStudentForm({ ...studentForm, address: e.target.value })} required />
                 </div>
                 <button type="submit" className="btn-primary">Registrar</button>
               </form>
@@ -295,31 +255,13 @@ function App() {
           </div>
         )}
 
-        {view === 'login' && (
-          <div className="login-container">
-            <div className="login-card">
-              <h2>Panel de Administrador</h2>
-              <form onSubmit={handleLogin}>
-                <div className="form-group">
-                  <label>Usuario</label>
-                  <input type="text" value={loginForm.username} onChange={e => setLoginForm({...loginForm, username: e.target.value})} required />
-                </div>
-                <div className="form-group">
-                  <label>Contraseña</label>
-                  <input type="password" value={loginForm.password} onChange={e => setLoginForm({...loginForm, password: e.target.value})} required />
-                </div>
-                <button type="submit" className="btn-primary">Entrar</button>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {view === 'dashboard' && isLoggedIn && (
+        {view === 'dashboard' && (
           <div className="dashboard-container">
             <h2>Listado de Alumnos</h2>
             <p className="muted" style={{ marginTop: '-0.5rem' }}>
-              Resumen de los datos del archivo Nuevo-ingreso.xlsx. Para cargar o actualizar
-              estos datos, sube el archivo de aspirantes en <strong>Generador Grupos</strong>.
+              Los datos se llenan al subir el archivo de aspirantes en{' '}
+              <strong>Generador Grupos</strong> y viven solo durante esta sesión:
+              al recargar la página se empieza de cero.
             </p>
 
             <div style={{ margin: '1rem 0' }}>
@@ -352,14 +294,14 @@ function App() {
                       <td>{s.name}</td>
                       <td>{s.boleta}</td>
                       <td>{s.gender || '—'}</td>
-                      <td>{s.Career?.name}</td>
+                      <td>{s.career}</td>
                       <td>{s.address}</td>
                     </tr>
                   ))}
                   {filteredStudents.length === 0 && (
                     <tr>
                       <td colSpan="5" className="faint" style={{ textAlign: 'center' }}>
-                        {students.length === 0 ? 'No hay alumnos registrados' : 'Sin resultados para la búsqueda'}
+                        {students.length === 0 ? 'Aún no hay alumnos. Sube el archivo de aspirantes en Generador Grupos.' : 'Sin resultados para la búsqueda'}
                       </td>
                     </tr>
                   )}
@@ -369,62 +311,111 @@ function App() {
           </div>
         )}
 
-        {view === 'generator' && isLoggedIn && (
-          <div className="dashboard-container">
-            <div className="login-card" style={{maxWidth: '700px', margin: '0 auto', textAlign: 'center'}}>
+        {view === 'generator' && (
+          <div className="dashboard-container generator">
+            <header className="generator-head">
               <h2>Generador de Secuencias</h2>
-              <p>Sube el archivo de Aspirantes y el archivo de Secuencias (cupos) para asignar grupos.</p>
+              <p className="muted">Sigue los pasos para asignar los grupos a partir de tus archivos de Excel.</p>
+            </header>
 
-              <div className="panel">
-                <div style={{ marginBottom: '1rem' }}>
-                  <strong>1. Archivo de Aspirantes Inscritos</strong><br/>
-                  <span className="muted" style={{ fontSize: '0.8rem' }}>Al seleccionarlo se actualiza también el apartado Alumnos.</span><br/>
-                  <input
-                    type="file"
-                    accept=".xlsx, .xls"
-                    ref={fileGeneratorRef}
-                    style={{ display: 'none' }}
-                    onChange={handleAspirantesSelect}
-                  />
-                  <button className="btn-primary" onClick={() => fileGeneratorRef.current?.click()} disabled={isSyncingAspirantes} style={{ width: 'auto', padding: '0.5rem 1rem', marginTop: '0.5rem' }}>
-                    {isSyncingAspirantes ? 'Cargando...' : 'Seleccionar'}
-                  </button>
-                  <span style={{ marginLeft: '1rem', fontSize: '0.9rem' }}>{aspirantesFile ? aspirantesFile.name : 'Ningún archivo seleccionado'}</span>
-                </div>
-
-                <div>
-                  <strong>2. Archivo de Secuencias con cupos</strong><br/>
-                  <input
-                    type="file"
-                    accept=".xlsx, .xls"
-                    ref={fileSecuenciasRef}
-                    style={{ display: 'none' }}
-                    onChange={handleSecuenciasSelect}
-                  />
-                  <button className="btn-primary" onClick={() => fileSecuenciasRef.current?.click()} style={{ width: 'auto', padding: '0.5rem 1rem', marginTop: '0.5rem' }}>Seleccionar</button>
-                  <span style={{ marginLeft: '1rem', fontSize: '0.9rem' }}>{secuenciasFile ? secuenciasFile.name : 'Ningún archivo seleccionado'}</span>
+            {/* Paso 1 */}
+            <section className={`step-card ${aspirantesFile ? 'is-done' : ''}`}>
+              <div className="step-head">
+                <span className="step-num">{aspirantesFile ? '✓' : '1'}</span>
+                <div className="step-title">
+                  <h3>Archivo de Aspirantes inscritos</h3>
+                  <p className="muted">Al seleccionarlo se llena también el apartado Alumnos.</p>
                 </div>
               </div>
+              <div className="step-body">
+                <input
+                  type="file"
+                  accept=".xlsx, .xls"
+                  ref={fileGeneratorRef}
+                  style={{ display: 'none' }}
+                  onChange={handleAspirantesSelect}
+                />
+                <button className="btn-file" onClick={() => fileGeneratorRef.current?.click()} disabled={isSyncingAspirantes}>
+                  {isSyncingAspirantes ? 'Cargando…' : 'Seleccionar archivo'}
+                </button>
+                <span className={`file-name ${aspirantesFile ? 'has-file' : ''}`}>
+                  {aspirantesFile ? aspirantesFile.name : 'Ningún archivo seleccionado'}
+                </span>
+              </div>
+            </section>
 
-              {/* Distribución por sexo */}
-              <div className="panel">
-                <strong>3. Distribución por sexo en cada secuencia</strong>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
-                  <label style={{ fontWeight: 'normal' }}>
-                    Mujeres:{' '}
-                    <input
-                      type="number" min="0" max="100"
-                      value={defaultWomenPct}
-                      onChange={e => setDefaultWomenPct(clampPct(e.target.value))}
-                      style={{ width: '80px', display: 'inline-block' }}
-                    /> %
-                  </label>
-                  <span>Hombres: <strong>{100 - clampPct(defaultWomenPct)}%</strong></span>
-                  <span className="muted" style={{ fontSize: '0.85rem' }}>(predeterminado 50% / 50%)</span>
+            {/* Paso 2 */}
+            <section className={`step-card ${secuenciasFile ? 'is-done' : ''}`}>
+              <div className="step-head">
+                <span className="step-num">{secuenciasFile ? '✓' : '2'}</span>
+                <div className="step-title">
+                  <h3>Archivo de Secuencias con cupos</h3>
+                  <p className="muted">Define los grupos disponibles y su cupo por carrera.</p>
+                </div>
+              </div>
+              <div className="step-body">
+                <input
+                  type="file"
+                  accept=".xlsx, .xls"
+                  ref={fileSecuenciasRef}
+                  style={{ display: 'none' }}
+                  onChange={handleSecuenciasSelect}
+                />
+                <button className="btn-file" onClick={() => fileSecuenciasRef.current?.click()}>Seleccionar archivo</button>
+                <span className={`file-name ${secuenciasFile ? 'has-file' : ''}`}>
+                  {secuenciasFile ? secuenciasFile.name : 'Ningún archivo seleccionado'}
+                </span>
+              </div>
+            </section>
+
+            {/* Paso 3 - Distribución por sexo (control visual) */}
+            <section className="step-card">
+              <div className="step-head">
+                <span className="step-num">3</span>
+                <div className="step-title">
+                  <h3>Distribución por sexo en cada secuencia</h3>
+                  <p className="muted">Ajusta el balance de mujeres y hombres. Se aplica a todas las secuencias.</p>
+                </div>
+              </div>
+              <div className="step-body">
+                <div className="ratio-control">
+                  <div className="ratio-legend">
+                    <span className="ratio-tag women">♀ Mujeres <strong>{womenPct}%</strong></span>
+                    <span className="ratio-tag men"><strong>{100 - womenPct}%</strong> Hombres ♂</span>
+                  </div>
+
+                  <input
+                    type="range" min="0" max="100" step="1"
+                    className="ratio-slider"
+                    value={womenPct}
+                    onChange={e => setDefaultWomenPct(clampPct(e.target.value))}
+                    aria-label="Porcentaje de mujeres"
+                  />
+
+                  <div className="ratio-bar" role="img" aria-label={`${womenPct}% mujeres, ${100 - womenPct}% hombres`}>
+                    <div className="ratio-bar-women" style={{ width: `${womenPct}%` }}>
+                      {womenPct >= 12 && <span>{womenPct}%</span>}
+                    </div>
+                    <div className="ratio-bar-men" style={{ width: `${100 - womenPct}%` }}>
+                      {100 - womenPct >= 12 && <span>{100 - womenPct}%</span>}
+                    </div>
+                  </div>
+
+                  <div className="ratio-exact">
+                    <label>
+                      Ajuste exacto de mujeres:
+                      <input
+                        type="number" min="0" max="100"
+                        value={womenPct}
+                        onChange={e => setDefaultWomenPct(clampPct(e.target.value))}
+                      /> %
+                    </label>
+                    <span className="muted" style={{ fontSize: '0.85rem' }}>(predeterminado 50% / 50%)</span>
+                  </div>
                 </div>
 
                 {secuenciasList.length > 0 && (
-                  <details className="pct-editor" style={{ marginTop: '0.75rem' }}>
+                  <details className="pct-editor">
                     <summary>Personalizar porcentaje por secuencia ({secuenciasList.length} secuencias)</summary>
                     <div className="pct-scroll">
                       <table className="pct-table">
@@ -440,7 +431,7 @@ function App() {
                         </thead>
                         <tbody>
                           {secuenciasList.map(s => {
-                            const pct = womenPctBySeq[s.secuencia] ?? clampPct(defaultWomenPct);
+                            const pct = womenPctBySeq[s.secuencia] ?? womenPct;
                             return (
                               <tr key={s.secuencia}>
                                 <td><strong>{s.secuencia}</strong></td>
@@ -463,31 +454,35 @@ function App() {
                     </div>
                     {Object.keys(womenPctBySeq).length > 0 && (
                       <button className="btn-outline" onClick={() => setWomenPctBySeq({})}>
-                        Restablecer todos al {clampPct(defaultWomenPct)}%
+                        Restablecer todos al {womenPct}%
                       </button>
                     )}
                   </details>
                 )}
               </div>
+            </section>
 
-              {/* Espacio reservado: API de kilómetros (aún no disponible) */}
-              <div className="panel panel-placeholder">
-                <strong>4. Distancia y preferencia de turno</strong> <em>(próximamente)</em>
-                <p style={{ margin: '0.5rem 0 0', fontSize: '0.85rem' }}>
-                  Aquí se conectará la API que calcula los kilómetros del domicilio de cada aspirante:
-                  entre más lejos viva, mayor preferencia tendrá para el turno matutino.
-                </p>
+            {/* Paso 4 - Placeholder API de kilómetros */}
+            <section className="step-card step-card--soon">
+              <div className="step-head">
+                <span className="step-num">4</span>
+                <div className="step-title">
+                  <h3>Distancia y preferencia de turno <span className="soon-badge">Próximamente</span></h3>
+                  <p className="muted">
+                    Aquí se conectará la API que calcula los kilómetros del domicilio de cada aspirante:
+                    entre más lejos viva, mayor preferencia tendrá para el turno matutino.
+                  </p>
+                </div>
               </div>
+            </section>
 
-              <button
-                  className="btn-primary"
-                  onClick={handleGenerateExcel}
-                  disabled={isGenerating || !aspirantesFile || !secuenciasFile}
-                  style={{ padding: '1rem', fontSize: '1.2rem', marginTop: '2rem' }}
-                >
-                  {isGenerating ? 'Generando...' : 'Procesar y Descargar'}
-              </button>
-            </div>
+            <button
+              className="btn-generate"
+              onClick={handleGenerateExcel}
+              disabled={isGenerating || !aspirantesFile || !secuenciasFile}
+            >
+              {isGenerating ? 'Generando…' : 'Procesar y Descargar'}
+            </button>
           </div>
         )}
       </main>

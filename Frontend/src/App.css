@@ -185,6 +185,240 @@ input, select, textarea {
   color: var(--text-muted);
 }
 
+/* ===== Generador de secuencias (stepper) ===== */
+.generator {
+  max-width: 760px;
+}
+
+.generator-head {
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+
+.generator-head h2 {
+  color: var(--ipn-maroon);
+  margin-bottom: 0.35rem;
+}
+
+[data-theme="dark"] .generator-head h2 {
+  color: var(--ipn-gold);
+}
+
+/* Cada paso es su propio recuadro */
+.step-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-left: 5px solid var(--ipn-maroon);
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.1rem;
+  box-shadow: 0 2px 8px var(--shadow);
+  transition: border-color 0.25s, box-shadow 0.25s, transform 0.15s;
+}
+
+.step-card.is-done {
+  border-left-color: #2e8b57;
+}
+
+.step-card--soon {
+  border-left-color: var(--ipn-gold);
+  background: var(--panel-bg);
+}
+
+.step-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+/* Círculo numerado del paso */
+.step-num {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--ipn-maroon);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 1.05rem;
+  box-shadow: 0 2px 6px var(--shadow);
+}
+
+.step-card.is-done .step-num {
+  background: #2e8b57;
+}
+
+.step-card--soon .step-num {
+  background: var(--ipn-gold);
+}
+
+.step-title h3 {
+  margin: 0.2rem 0 0.15rem;
+  color: var(--text);
+  font-size: 1.1rem;
+}
+
+.step-title p {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.step-body {
+  margin-top: 1rem;
+  padding-left: calc(38px + 1rem); /* alinear con el texto del encabezado */
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+}
+
+/* Botón para elegir archivo */
+.btn-file {
+  background: var(--ipn-maroon);
+  color: #fff;
+  border: none;
+  padding: 0.55rem 1.15rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.95rem;
+  transition: background-color 0.2s;
+}
+
+.btn-file:hover { background: var(--ipn-maroon-hover); }
+.btn-file:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.file-name {
+  font-size: 0.9rem;
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.file-name.has-file {
+  color: var(--text);
+  font-style: normal;
+  font-weight: 600;
+}
+
+.file-name.has-file::before {
+  content: '📄 ';
+  font-style: normal;
+}
+
+.soon-badge {
+  display: inline-block;
+  background: var(--ipn-gold);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  vertical-align: middle;
+  margin-left: 0.35rem;
+}
+
+/* ----- Control visual de distribución por sexo (paso 3) ----- */
+.ratio-control {
+  width: 100%;
+}
+
+.ratio-legend {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.6rem;
+  font-size: 0.95rem;
+}
+
+.ratio-tag { white-space: nowrap; }
+.ratio-tag.women { color: var(--ipn-maroon); }
+.ratio-tag.men { color: var(--ipn-gold); }
+
+[data-theme="dark"] .ratio-tag.women { color: #e78aa0; }
+
+.ratio-slider {
+  width: 100%;
+  accent-color: var(--ipn-maroon);
+  cursor: pointer;
+  margin: 0.25rem 0 0.9rem;
+}
+
+/* Barra de proporción mujeres / hombres */
+.ratio-bar {
+  display: flex;
+  height: 30px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.ratio-bar-women,
+.ratio-bar-men {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 700;
+  transition: width 0.15s ease;
+  overflow: hidden;
+}
+
+.ratio-bar-women { background: var(--ipn-maroon); }
+.ratio-bar-men { background: var(--ipn-gold); }
+
+.ratio-exact {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+}
+
+.ratio-exact label {
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ratio-exact input {
+  width: 72px;
+  padding: 0.4rem 0.5rem;
+}
+
+/* Botón grande de generar */
+.btn-generate {
+  display: block;
+  width: 100%;
+  background: var(--ipn-maroon);
+  color: #fff;
+  border: none;
+  padding: 1rem;
+  border-radius: 10px;
+  font-size: 1.15rem;
+  font-weight: 700;
+  cursor: pointer;
+  margin-top: 1.5rem;
+  box-shadow: 0 4px 12px var(--shadow);
+  transition: background-color 0.2s, transform 0.15s;
+}
+
+.btn-generate:hover:not(:disabled) {
+  background: var(--ipn-maroon-hover);
+  transform: translateY(-1px);
+}
+
+.btn-generate:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .muted { color: var(--text-muted); }
 .faint { color: var(--text-faint); }
 
@@ -306,18 +540,31 @@ input, select, textarea {
 }
 
 .status-msg {
-  padding: 1rem;
-  margin-top: 1rem;
-  border-radius: 4px;
-  text-align: center;
+  padding: 0.9rem 1rem;
+  margin: 1rem auto 0;
+  max-width: 1000px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
 }
 
 .status-msg .close-btn {
-  float: right;
+  flex: 0 0 auto;
   background: none;
   border: none;
   cursor: pointer;
   color: inherit;
+  font-size: 1.25rem;
+  line-height: 1;
+  padding: 0 0.25rem;
+}
+
+/* El editor por secuencia ocupa todo el ancho del paso */
+.step-body .pct-editor {
+  flex: 1 1 100%;
+  margin-top: 0.5rem;
 }
 
 .success { background-color: var(--success-bg); color: var(--success-text); }
@@ -434,5 +681,18 @@ input, select, textarea {
     width: 46px;
     height: 46px;
     font-size: 1.25rem;
+  }
+
+  /* Los pasos del generador sin tanto sangrado en pantallas angostas */
+  .step-card {
+    padding: 1rem;
+  }
+
+  .step-body {
+    padding-left: 0;
+  }
+
+  .ratio-legend {
+    font-size: 0.85rem;
   }
 }

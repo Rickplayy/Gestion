@@ -1,6 +1,6 @@
 import { limpiar, readSheetRows, findHeaderRow, getXLSX } from "./excelUtils";
 
-const normalizeCareer = (name) => {
+export const normalizeCareer = (name) => {
   const n = String(name || '').toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   if (n.includes('ADMINISTRACION')) return 'ADMINISTRACIÓN INDUSTRIAL';
   if (n.includes('CIENCIAS DE LA INFORMATICA')) return 'CIENCIAS DE LA INFORMÁTICA';
