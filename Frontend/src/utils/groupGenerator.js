@@ -79,15 +79,15 @@ async function enrichWithKms(aspirantes) {
  * Genera la asignación de grupos.
  *
  * @param aspirantesBuffer  Excel de aspirantes (Nuevo-ingreso-261.xlsx)
- * @param secuenciasBuffer  Excel de secuencias con cupos (Secuencias primer semestre 26-2.xlsx)
+ * @param secuencias         Lista ya extraída con extractSecuencias() (evita re-leer y
+ *                           re-parsear el mismo Excel de secuencias, que la UI ya carga
+ *                           al seleccionar el archivo)
  * @param options
  *   - defaultWomenPct: % de mujeres por secuencia (default 50; hombres = 100 - mujeres)
  *   - womenPctBySeq:   overrides por secuencia, ej. { "1AM10": 60 }
  */
-export async function generateGroupsFromBuffer(aspirantesBuffer, secuenciasBuffer, options = {}) {
+export async function generateGroupsFromBuffer(aspirantesBuffer, secuencias, options = {}) {
   const { defaultWomenPct = 50, womenPctBySeq = {} } = options;
-
-  const secuencias = await extractSecuencias(secuenciasBuffer);
 
   const rows = await readSheetRows(aspirantesBuffer, { sheetNameIncludes: 'ASPIRANTES' });
   const headerRowIndex = findHeaderRow(rows, ["BOLETA", "NOMBRE"]);
@@ -160,6 +160,15 @@ export async function generateGroupsFromBuffer(aspirantesBuffer, secuenciasBuffe
     const hombres = admitidos.filter(s => s.genero === 'Hombre');
     const totalAdmitidos = admitidos.length;
 
+    // Se consumen ambas listas con punteros en vez de shift(): shift() es O(n)
+    // por llamada (reindexa el arreglo completo), lo que vuelve el reparto
+    // O(n²) con cohortes grandes. Avanzar un índice es O(1) y preserva el
+    // mismo orden de asignación (ambas listas ya vienen ordenadas por promedio).
+    let mIdx = 0;
+    let hIdx = 0;
+    const mujeresLeft = () => mujeres.length - mIdx;
+    const hombresLeft = () => hombres.length - hIdx;
+
     // Repartir proporcionalmente al cupo de cada secuencia
     for (let i = 0; i < seqs.length; i++) {
       const { secuencia, cupo } = seqs[i];
@@ -167,7 +176,7 @@ export async function generateGroupsFromBuffer(aspirantesBuffer, secuenciasBuffe
 
       // La última secuencia absorbe lo que quede (evita perder gente por redondeos)
       let target = esUltima
-        ? mujeres.length + hombres.length
+        ? mujeresLeft() + hombresLeft()
         : Math.min(cupo, Math.round(totalAdmitidos * (cupo / cupoTotal)));
       if (esUltima) target = Math.min(target, cupo + seqs.length); // margen pequeño por redondeo
 
@@ -176,26 +185,26 @@ export async function generateGroupsFromBuffer(aspirantesBuffer, secuenciasBuffe
       let assigned = 0;
 
       // Mujeres hasta su cuota
-      while (assigned < womenQuota && mujeres.length > 0) {
-        asignar(mujeres.shift(), secuencia);
+      while (assigned < womenQuota && mIdx < mujeres.length) {
+        asignar(mujeres[mIdx++], secuencia);
         assigned++;
       }
       // Hombres para completar
-      while (assigned < target && hombres.length > 0) {
-        asignar(hombres.shift(), secuencia);
+      while (assigned < target && hIdx < hombres.length) {
+        asignar(hombres[hIdx++], secuencia);
         assigned++;
       }
       // Si faltan hombres, completar con mujeres
-      while (assigned < target && mujeres.length > 0) {
-        asignar(mujeres.shift(), secuencia);
+      while (assigned < target && mIdx < mujeres.length) {
+        asignar(mujeres[mIdx++], secuencia);
         assigned++;
       }
     }
 
     // Sobrantes por redondeo → última secuencia
     const lastSeq = seqs[seqs.length - 1].secuencia;
-    while (mujeres.length > 0) asignar(mujeres.shift(), lastSeq);
-    while (hombres.length > 0) asignar(hombres.shift(), lastSeq);
+    while (mIdx < mujeres.length) asignar(mujeres[mIdx++], lastSeq);
+    while (hIdx < hombres.length) asignar(hombres[hIdx++], lastSeq);
   }
 
   if (finalAssignments.length === 0) {
@@ -207,15 +216,23 @@ export async function generateGroupsFromBuffer(aspirantesBuffer, secuenciasBuffe
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
-// Abre el diálogo "Guardar como" para que el usuario elija nombre y ubicación.
-// DEBE llamarse directamente en el click (antes de procesar los archivos):
-// si se llama después de un procesamiento largo, el navegador invalida el
-// gesto del usuario y la escritura falla dejando un .xlsx vacío/dañado.
-// Regresa: fileHandle | { cancelled: true } | null (navegador sin soporte).
-export async function pickSaveFile(defaultFilename = 'gruposAsignados.xlsx') {
+// Abre el diálogo "Guardar como" y deja listo el stream de escritura.
+//
+// Los DOS pasos (showSaveFilePicker y createWritable) necesitan la activación
+// del usuario, así que ambos ocurren aquí, dentro del click y antes de procesar
+// nada. Dejar createWritable() para después del procesamiento es justo lo que
+// dejaba el archivo en 0 bytes: al elegir el nombre el diálogo ya crea el
+// archivo vacío, y para cuando terminaba el reparto el gesto había expirado y
+// createWritable() fallaba con NotAllowedError, así que nunca se escribía nada.
+// El stream, en cambio, sigue siendo válido por más que tarde el procesamiento.
+//
+// Regresa: { handle, writable } | { cancelled: true } | null (sin soporte).
+export async function pickSaveTarget(defaultFilename = 'gruposAsignados.xlsx') {
   if (!window.showSaveFilePicker) return null;
+
+  let handle;
   try {
-    return await window.showSaveFilePicker({
+    handle = await window.showSaveFilePicker({
       suggestedName: defaultFilename,
       types: [{
         description: 'Excel Workbook',
@@ -224,36 +241,84 @@ export async function pickSaveFile(defaultFilename = 'gruposAsignados.xlsx') {
     });
   } catch (err) {
     if (err.name === 'AbortError') return { cancelled: true };
-    throw err;
+    return null; // sin permiso: se usará la descarga clásica
+  }
+
+  try {
+    return { handle, writable: await handle.createWritable() };
+  } catch {
+    await discardSaveTarget({ handle });
+    return null;
   }
 }
 
-// Escribe el Excel. Si hay fileHandle (elegido con pickSaveFile) escribe ahí;
+// Descarta el destino elegido sin dejar rastro. Se usa cuando algo falla
+// después de abrir el diálogo: es preferible no dejar nada a dejar un .xlsx de
+// 0 bytes, que parece descargado pero Excel rechaza como dañado.
+export async function discardSaveTarget(target) {
+  if (!target || target.cancelled) return;
+  try { await target.writable?.abort(); } catch { /* ya estaba cerrado */ }
+  try { await target.handle?.remove(); } catch { /* navegador sin remove() */ }
+}
+
+// Escribe el Excel. Si hay target (elegido con pickSaveTarget) escribe ahí;
 // si no, descarga clásica del navegador con el nombre sugerido.
-export async function exportToExcel(data, defaultFilename = 'gruposAsignados.xlsx', fileHandle = null) {
+// Regresa { name, location: 'elegido' | 'descargas' }.
+export async function exportToExcel(data, defaultFilename = 'gruposAsignados.xlsx', target = null) {
   const XLSX = await getXLSX();
   const ws = XLSX.utils.json_to_sheet(data);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Grupos Asignados");
 
   const bytes = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-  const blob = new Blob([bytes], { type: XLSX_MIME });
 
-  if (fileHandle) {
-    const writable = await fileHandle.createWritable();
-    await writable.write(blob);
-    await writable.close();
-    return fileHandle.name;
+  if (target?.writable) {
+    const saved = await writeToTarget(target, bytes);
+    if (saved) return { name: saved, location: 'elegido' };
+    // Si la escritura no cuajó se descarta el archivo a medias y se cae a la
+    // descarga normal: el usuario se queda con su Excel de todos modos.
   }
 
-  // Fallback: descarga normal (el navegador decide la carpeta de descargas)
-  const url = URL.createObjectURL(blob);
+  downloadBytes(bytes, defaultFilename);
+  return { name: defaultFilename, location: 'descargas' };
+}
+
+// Escribe en el destino elegido y confirma que el archivo quedó con contenido.
+// Regresa el nombre guardado, o null si no se pudo (el llamador descarga).
+async function writeToTarget(target, bytes) {
+  try {
+    await target.writable.write(bytes);
+    await target.writable.close();
+  } catch {
+    await discardSaveTarget(target);
+    return null;
+  }
+
+  // Verificación explícita: close() puede resolver y aun así dejar el archivo
+  // vacío (antivirus o sincronización bloqueando el rename del .crswap). Es
+  // exactamente el caso que Excel reporta como "dañado o extensión no válida",
+  // así que se confirma el tamaño antes de dar el guardado por bueno.
+  try {
+    const { size } = await target.handle.getFile();
+    if (size === bytes.byteLength) return target.handle.name;
+  } catch { /* no se pudo releer: se trata como fallo */ }
+
+  await discardSaveTarget({ handle: target.handle });
+  return null;
+}
+
+// Descarga normal (el navegador decide la carpeta de descargas).
+// OJO: no revocar la URL justo después de click(). La descarga real del blob
+// la dispara el navegador de forma asíncrona; revocar de inmediato corta la
+// lectura a la mitad y el .xlsx queda truncado (más notorio cuantos más
+// alumnos trae). Se espera un momento antes de liberar la URL.
+function downloadBytes(bytes, filename) {
+  const url = URL.createObjectURL(new Blob([bytes], { type: XLSX_MIME }));
   const a = document.createElement('a');
   a.href = url;
-  a.download = defaultFilename;
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   a.remove();
-  URL.revokeObjectURL(url);
-  return defaultFilename;
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
 }

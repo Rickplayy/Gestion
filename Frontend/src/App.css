@@ -72,8 +72,21 @@ body {
   box-shadow: 0 2px 4px var(--shadow);
 }
 
+.brand {
+  display: flex;
+  flex-direction: column;
+}
+
 .logo {
   font-weight: bold;
+}
+
+.app-title {
+  margin-top: 0.15rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  opacity: 0.9;
 }
 
 .nav-links {
@@ -220,11 +233,6 @@ input, select, textarea {
   border-left-color: #2e8b57;
 }
 
-.step-card--soon {
-  border-left-color: var(--ipn-gold);
-  background: var(--panel-bg);
-}
-
 .step-head {
   display: flex;
   align-items: flex-start;
@@ -249,10 +257,6 @@ input, select, textarea {
 
 .step-card.is-done .step-num {
   background: #2e8b57;
-}
-
-.step-card--soon .step-num {
-  background: var(--ipn-gold);
 }
 
 .step-title h3 {
@@ -308,19 +312,6 @@ input, select, textarea {
   font-style: normal;
 }
 
-.soon-badge {
-  display: inline-block;
-  background: var(--ipn-gold);
-  color: #fff;
-  font-size: 0.7rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  padding: 0.15rem 0.5rem;
-  border-radius: 999px;
-  vertical-align: middle;
-  margin-left: 0.35rem;
-}
 
 /* ----- Control visual de distribución por sexo (paso 3) ----- */
 .ratio-control {
