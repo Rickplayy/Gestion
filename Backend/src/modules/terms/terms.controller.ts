@@ -1,0 +1,26 @@
+import type { FastifyReply, FastifyRequest } from 'fastify';
+import type { TermsService } from './terms.service.js';
+import { errorToStatusCode } from '../../shared/errors/index.js';
+import type { CreateTermBody } from './terms.schema.js';
+
+export type TermsController = {
+  create: (
+    request: FastifyRequest<{ Body: CreateTermBody }>,
+    reply: FastifyReply,
+  ) => Promise<FastifyReply>;
+};
+
+export const createTermsController = (service: TermsService): TermsController => ({
+  create: async (request, reply) => {
+    const result = await service.create(request.body);
+
+    if (!result.ok) {
+      return reply.status(errorToStatusCode(result.error.code)).send({
+        code: result.error.code,
+        message: result.error.message,
+      });
+    }
+
+    return reply.status(201).send(result.value);
+  },
+});

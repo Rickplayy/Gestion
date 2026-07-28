@@ -1,152 +1,241 @@
 import { useState, useEffect, useRef } from 'react';
+import { api, getToken, setToken } from './api/client';
 import { parseExcelBuffer } from './utils/excelParser';
-import {
-  generateGroupsFromBuffer,
-  exportToExcel,
-  extractSecuencias,
-  pickSaveTarget,
-  discardSaveTarget,
-  normalizeCareer,
-} from './utils/groupGenerator';
+import { extractSecuencias, pickSaveTarget, discardSaveTarget, exportToExcel } from './utils/groupGenerator';
+import { buildGruposPayload, buildAlumnosPayload } from './utils/mapToBackend';
 import './App.css';
 
-// Convierte los registros crudos del Excel de aspirantes a filas de alumnos
-// (nombre, boleta, sexo, carrera, dirección). Deduplica por boleta. Se usa
-// solo para contar cuántos aspirantes únicos trae el archivo cargado.
-const mapAspirantesToStudents = (parsed) => {
-  const byBoleta = new Map();
-  for (const r of parsed) {
-    const generoRaw = String(r.GENERO || '').trim().toUpperCase();
-    let gender = '—';
-    if (generoRaw === 'F' || generoRaw === 'FEMENINO') gender = 'Femenino';
-    else if (generoRaw === 'M' || generoRaw === 'MASCULINO') gender = 'Masculino';
+function LoginForm({ onLoggedIn }) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-    // Algunos aspirantes aún no tienen boleta: se usa la CURP como identidad.
-    const boletaRaw = String(r.BOLETA || '').trim();
-    const curp = String(r.CURP || '').trim();
-    const identidad = boletaRaw || (curp ? `SB-${curp}` : '');
-    if (!identidad) continue;
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+    try {
+      const { token } = await api.login(username, password);
+      setToken(token);
+      onLoggedIn();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    byBoleta.set(identidad, {
-      id: identidad,
-      name: String(r.NOMBRE || 'Sin nombre').trim(),
-      boleta: identidad,
-      gender,
-      career: normalizeCareer(r.PROGRAMA_EDUCATIVO),
-      address: String(r.DOMICILIO || 'Sin dirección').trim(),
-    });
-  }
-  return [...byBoleta.values()];
-};
+  return (
+    <div className="login-container">
+      <form className="login-card" onSubmit={handleSubmit}>
+        <h2>Sistema Gestión IPN</h2>
+        <div className="form-group">
+          <label htmlFor="username">Usuario</label>
+          <input id="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
+        </div>
+        <div className="form-group">
+          <label htmlFor="password">Contraseña</label>
+          <input
+            id="password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+        </div>
+        {error && <div className="status-msg error">{error}</div>}
+        <button className="btn-primary" type="submit" disabled={loading}>
+          {loading ? 'Entrando…' : 'Entrar'}
+        </button>
+      </form>
+    </div>
+  );
+}
 
 function App() {
   const [message, setMessage] = useState({ text: '', type: '' });
+  const [authed, setAuthed] = useState(() => Boolean(getToken()));
+  const [carreras, setCarreras] = useState([]);
 
-  const fileGeneratorRef = useRef(null);
+  const [termDescripcion, setTermDescripcion] = useState('');
+  const [termId, setTermId] = useState(null);
+  const [manualTermId, setManualTermId] = useState('');
+  const [isCreatingTerm, setIsCreatingTerm] = useState(false);
+
   const fileSecuenciasRef = useRef(null);
-  const [aspirantesFile, setAspirantesFile] = useState(null);
   const [secuenciasFile, setSecuenciasFile] = useState(null);
-  const [secuenciasList, setSecuenciasList] = useState([]);
-  const [defaultWomenPct, setDefaultWomenPct] = useState(50);
-  const [womenPctBySeq, setWomenPctBySeq] = useState({});
-  const [isSyncingAspirantes, setIsSyncingAspirantes] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [gruposResumen, setGruposResumen] = useState(null);
+  const [isUploadingGrupos, setIsUploadingGrupos] = useState(false);
+
+  const fileAspirantesRef = useRef(null);
+  const [aspirantesFile, setAspirantesFile] = useState(null);
+  const [alumnosResumen, setAlumnosResumen] = useState(null);
+  const [isUploadingAlumnos, setIsUploadingAlumnos] = useState(false);
+
+  const [conteo, setConteo] = useState(null);
+  const [isLoadingConteo, setIsLoadingConteo] = useState(false);
+  const [isAsignando, setIsAsignando] = useState(false);
+
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'light');
 
-  // Aplicar el tema al documento y recordarlo (única preferencia que se guarda)
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem('theme', theme);
   }, [theme]);
 
-  // Al seleccionar el archivo de Aspirantes se parsea en el navegador para
-  // validar que se lee bien y mostrar cuántos aspirantes únicos trae. Todo en
-  // memoria: no se guarda en ninguna base de datos.
+  useEffect(() => {
+    if (!authed) return;
+    api
+      .getCarreras()
+      .then((res) => setCarreras(res.items))
+      .catch((err) => setMessage({ text: `No se pudo cargar el catálogo de carreras: ${err.message}`, type: 'error' }));
+  }, [authed]);
+
+  const handleLogout = () => {
+    setToken(null);
+    setAuthed(false);
+  };
+
+  if (!authed) {
+    return <LoginForm onLoggedIn={() => setAuthed(true)} />;
+  }
+
+  const handleCreateTerm = async (e) => {
+    e.preventDefault();
+    setIsCreatingTerm(true);
+    try {
+      const term = await api.createTerm(termDescripcion.trim());
+      setTermId(term.id);
+      setMessage({ text: `Ciclo escolar "${term.descripcion}" creado (id ${term.id}).`, type: 'success' });
+    } catch (err) {
+      setMessage({ text: `Error creando el ciclo: ${err.message}`, type: 'error' });
+    } finally {
+      setIsCreatingTerm(false);
+    }
+  };
+
+  const handleUseExistingTerm = (e) => {
+    e.preventDefault();
+    const id = Number.parseInt(manualTermId, 10);
+    if (!Number.isInteger(id) || id <= 0) {
+      setMessage({ text: 'Ingresa un id de ciclo escolar válido.', type: 'error' });
+      return;
+    }
+    setTermId(id);
+    setMessage({ text: `Usando ciclo escolar existente (id ${id}).`, type: 'success' });
+  };
+
+  const handleSecuenciasSelect = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setSecuenciasFile(file);
+    setGruposResumen(null);
+    setIsUploadingGrupos(true);
+    try {
+      const buffer = await file.arrayBuffer();
+      const list = await extractSecuencias(buffer);
+      const { validos, omitidos } = buildGruposPayload(list, carreras);
+      if (validos.length === 0) {
+        throw new Error('Ninguna secuencia se pudo mapear a una carrera/turno válidos.');
+      }
+      const result = await api.createGrupos(termId, validos);
+      setGruposResumen({ creados: result.items.length, omitidos });
+      setMessage({
+        text: `${result.items.length} grupo(s) creados${omitidos.length ? `, ${omitidos.length} omitido(s)` : ''}.`,
+        type: 'success',
+      });
+    } catch (err) {
+      setMessage({ text: `Error procesando secuencias: ${err.message}`, type: 'error' });
+    } finally {
+      setIsUploadingGrupos(false);
+    }
+  };
+
   const handleAspirantesSelect = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
     setAspirantesFile(file);
-
-    setIsSyncingAspirantes(true);
+    setAlumnosResumen(null);
+    setIsUploadingAlumnos(true);
     try {
       const buffer = await file.arrayBuffer();
-      const parsedData = await parseExcelBuffer(buffer);
-      const mapped = mapAspirantesToStudents(parsedData);
-      setMessage({ text: `Aspirantes cargados: ${mapped.length} alumnos.`, type: 'success' });
+      const parsed = await parseExcelBuffer(buffer);
+      const { validos, omitidos } = buildAlumnosPayload(parsed, carreras);
+      if (validos.length === 0) {
+        throw new Error('Ningún aspirante se pudo mapear correctamente.');
+      }
+      const result = await api.createAlumnos(termId, validos);
+      setAlumnosResumen({ ...result, omitidosLocal: omitidos });
+      setMessage({
+        text: `${result.insertados} alumno(s) insertados, ${result.duplicados.length} duplicado(s), ${result.fallidos.length} fallido(s), ${omitidos.length} omitido(s) antes de enviar.`,
+        type: 'success',
+      });
     } catch (err) {
-      console.error(err);
-      setMessage({ text: 'Error procesando el archivo: ' + err.message, type: 'error' });
+      setMessage({ text: `Error procesando aspirantes: ${err.message}`, type: 'error' });
     } finally {
-      setIsSyncingAspirantes(false);
+      setIsUploadingAlumnos(false);
     }
   };
 
-  // Al seleccionar el archivo de Secuencias se parsea de inmediato para
-  // mostrar el resumen de cupos y habilitar el editor de % por secuencia.
-  const handleSecuenciasSelect = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+  const handleConteo = async () => {
+    setIsLoadingConteo(true);
     try {
-      const buffer = await file.arrayBuffer();
-      const list = await extractSecuencias(buffer);
-      setSecuenciasFile(file);
-      setSecuenciasList(list);
-      setWomenPctBySeq({});
-      setMessage({ text: `Archivo de secuencias cargado: ${list.length} secuencias, cupo total ${list.reduce((s, x) => s + x.cupo, 0)}.`, type: 'success' });
+      const result = await api.getConteo(termId);
+      setConteo(result);
     } catch (err) {
-      setSecuenciasFile(null);
-      setSecuenciasList([]);
-      setMessage({ text: 'Error leyendo el archivo de secuencias: ' + err.message, type: 'error' });
+      setMessage({ text: `Error obteniendo el conteo: ${err.message}`, type: 'error' });
+    } finally {
+      setIsLoadingConteo(false);
     }
   };
 
-  const clampPct = (v) => Math.max(0, Math.min(100, Math.round(Number(v) || 0)));
-
-  const handleGenerateExcel = async () => {
-    if (!aspirantesFile || !secuenciasFile) {
-      setMessage({ text: 'Por favor selecciona ambos archivos.', type: 'error' });
-      return;
-    }
-
-    // "Guardar como" se abre PRIMERO, dentro del click y antes de procesar:
-    // tanto el diálogo como la apertura del stream de escritura dependen de la
-    // activación del usuario, que expira mientras se reparten los grupos.
+  const handleAsignarYExportar = async () => {
     const target = await pickSaveTarget('gruposAsignados.xlsx');
     if (target?.cancelled) {
       setMessage({ text: 'Guardado cancelado.', type: 'error' });
       return;
     }
 
-    setIsGenerating(true);
-    setMessage({ text: 'Procesando archivos y generando secuencias...', type: 'success' });
-
+    setIsAsignando(true);
     try {
-      const aspirantesBuffer = await aspirantesFile.arrayBuffer();
-      // secuenciasList ya fue parseada al seleccionar el archivo (paso 2): se
-      // reutiliza en vez de releer y re-parsear el mismo Excel de secuencias.
-      const generatedData = await generateGroupsFromBuffer(aspirantesBuffer, secuenciasList, {
-        defaultWomenPct: clampPct(defaultWomenPct),
-        womenPctBySeq,
-      });
-      const saved = await exportToExcel(generatedData, 'gruposAsignados.xlsx', target);
+      await api.asignarGrupos(termId);
+      const grupos = await api.getGrupos(termId);
+
+      const rows = [];
+      for (const grupo of grupos.items) {
+        for (const alumno of grupo.alumnos) {
+          rows.push({
+            Secuencia: grupo.secuencia,
+            Turno: grupo.turno === 'M' ? 'Matutino' : 'Vespertino',
+            Carrera: grupo.carrera,
+            PR: alumno.pr,
+            Nombre: alumno.nombre,
+            Genero: alumno.genero === 'F' ? 'Mujer' : 'Hombre',
+            Promedio: alumno.promedio ?? '',
+            DistanciaKm: alumno.distanceMeters != null ? Math.round(alumno.distanceMeters / 100) / 10 : '',
+          });
+        }
+      }
+
+      if (rows.length === 0) {
+        throw new Error('No quedó ningún alumno asignado a un grupo.');
+      }
+
+      const saved = await exportToExcel(rows, 'gruposAsignados.xlsx', target);
       setMessage({
         text: saved.location === 'descargas'
-          ? `"${saved.name}" se descargó a tu carpeta de Descargas con ${generatedData.length} alumnos asignados.`
-          : `"${saved.name}" guardado con ${generatedData.length} alumnos asignados.`,
+          ? `"${saved.name}" se descargó a tu carpeta de Descargas con ${rows.length} alumnos asignados.`
+          : `"${saved.name}" guardado con ${rows.length} alumnos asignados.`,
         type: 'success',
       });
     } catch (err) {
-      console.error(err);
-      // El diálogo ya había creado el archivo vacío: se descarta en vez de
-      // dejar un .xlsx de 0 bytes que Excel reporta como dañado.
       await discardSaveTarget(target);
-      setMessage({ text: 'Error generando el archivo: ' + err.message, type: 'error' });
+      setMessage({ text: `Error asignando/exportando: ${err.message}`, type: 'error' });
     } finally {
-      setIsGenerating(false);
+      setIsAsignando(false);
     }
   };
-
-  const womenPct = clampPct(defaultWomenPct);
 
   return (
     <div className="app-container">
@@ -155,6 +244,7 @@ function App() {
           <div className="logo">SISTEMA GESTIÓN IPN</div>
           <div className="app-title">Generador Grupos</div>
         </div>
+        <button className="btn-outline" onClick={handleLogout}>Salir</button>
       </nav>
 
       <main>
@@ -171,36 +261,48 @@ function App() {
             <p className="muted">Sigue los pasos para asignar los grupos a partir de tus archivos de Excel.</p>
           </header>
 
-          {/* Paso 1 */}
-          <section className={`step-card ${aspirantesFile ? 'is-done' : ''}`}>
+          {/* Paso 1: Ciclo escolar */}
+          <section className={`step-card ${termId ? 'is-done' : ''}`}>
             <div className="step-head">
-              <span className="step-num">{aspirantesFile ? '✓' : '1'}</span>
+              <span className="step-num">{termId ? '✓' : '1'}</span>
               <div className="step-title">
-                <h3>Archivo de Aspirantes inscritos</h3>
-                <p className="muted">Se usará para asignar a los alumnos a sus grupos.</p>
+                <h3>Ciclo escolar</h3>
+                <p className="muted">Crea el ciclo escolar de este proceso, o usa uno ya existente.</p>
               </div>
             </div>
             <div className="step-body">
-              <input
-                type="file"
-                accept=".xlsx, .xls"
-                ref={fileGeneratorRef}
-                style={{ display: 'none' }}
-                onChange={handleAspirantesSelect}
-              />
-              <button className="btn-file" onClick={() => fileGeneratorRef.current?.click()} disabled={isSyncingAspirantes}>
-                {isSyncingAspirantes ? 'Cargando…' : 'Seleccionar archivo'}
-              </button>
-              <span className={`file-name ${aspirantesFile ? 'has-file' : ''}`}>
-                {aspirantesFile ? aspirantesFile.name : 'Ningún archivo seleccionado'}
-              </span>
+              {termId ? (
+                <p>Ciclo escolar activo: <strong>id {termId}</strong></p>
+              ) : (
+                <>
+                  <form onSubmit={handleCreateTerm} style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                    <input
+                      placeholder="Ej. 2026-1"
+                      value={termDescripcion}
+                      onChange={(e) => setTermDescripcion(e.target.value)}
+                      required
+                    />
+                    <button className="btn-file" type="submit" disabled={isCreatingTerm}>
+                      {isCreatingTerm ? 'Creando…' : 'Crear ciclo'}
+                    </button>
+                  </form>
+                  <form onSubmit={handleUseExistingTerm} style={{ display: 'flex', gap: '0.5rem' }}>
+                    <input
+                      placeholder="O ingresa un id de ciclo existente"
+                      value={manualTermId}
+                      onChange={(e) => setManualTermId(e.target.value)}
+                    />
+                    <button className="btn-outline" type="submit">Usar</button>
+                  </form>
+                </>
+              )}
             </div>
           </section>
 
-          {/* Paso 2 */}
-          <section className={`step-card ${secuenciasFile ? 'is-done' : ''}`}>
+          {/* Paso 2: Secuencias -> Grupos */}
+          <section className={`step-card ${gruposResumen ? 'is-done' : ''}`}>
             <div className="step-head">
-              <span className="step-num">{secuenciasFile ? '✓' : '2'}</span>
+              <span className="step-num">{gruposResumen ? '✓' : '2'}</span>
               <div className="step-title">
                 <h3>Archivo de Secuencias con cupos</h3>
                 <p className="muted">Define los grupos disponibles y su cupo por carrera.</p>
@@ -214,118 +316,118 @@ function App() {
                 style={{ display: 'none' }}
                 onChange={handleSecuenciasSelect}
               />
-              <button className="btn-file" onClick={() => fileSecuenciasRef.current?.click()}>Seleccionar archivo</button>
+              <button
+                className="btn-file"
+                onClick={() => fileSecuenciasRef.current?.click()}
+                disabled={!termId || isUploadingGrupos}
+              >
+                {isUploadingGrupos ? 'Subiendo…' : 'Seleccionar archivo'}
+              </button>
               <span className={`file-name ${secuenciasFile ? 'has-file' : ''}`}>
                 {secuenciasFile ? secuenciasFile.name : 'Ningún archivo seleccionado'}
               </span>
+              {gruposResumen?.omitidos.length > 0 && (
+                <details className="panel" style={{ marginTop: '0.75rem' }}>
+                  <summary>{gruposResumen.omitidos.length} secuencia(s) omitida(s)</summary>
+                  <ul>
+                    {gruposResumen.omitidos.map((o, i) => (
+                      <li key={i}>{o.secuencia}: {o.motivo}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
             </div>
           </section>
 
-          {/* Paso 3 - Distribución por sexo (control visual) */}
-          <section className="step-card">
+          {/* Paso 3: Aspirantes -> Alumnos */}
+          <section className={`step-card ${alumnosResumen ? 'is-done' : ''}`}>
             <div className="step-head">
-              <span className="step-num">3</span>
+              <span className="step-num">{alumnosResumen ? '✓' : '3'}</span>
               <div className="step-title">
-                <h3>Distribución por sexo en cada secuencia</h3>
-                <p className="muted">Ajusta el balance de mujeres y hombres. Se aplica a todas las secuencias.</p>
+                <h3>Archivo de Aspirantes inscritos</h3>
+                <p className="muted">Se registran en el ciclo escolar y se les calcula distancia a UPIICSA.</p>
               </div>
             </div>
             <div className="step-body">
-              <div className="ratio-control">
-                <div className="ratio-legend">
-                  <span className="ratio-tag women">♀ Mujeres <strong>{womenPct}%</strong></span>
-                  <span className="ratio-tag men"><strong>{100 - womenPct}%</strong> Hombres ♂</span>
-                </div>
-
-                <input
-                  type="range" min="0" max="100" step="1"
-                  className="ratio-slider"
-                  value={womenPct}
-                  onChange={e => setDefaultWomenPct(clampPct(e.target.value))}
-                  aria-label="Porcentaje de mujeres"
-                />
-
-                <div className="ratio-bar" role="img" aria-label={`${womenPct}% mujeres, ${100 - womenPct}% hombres`}>
-                  <div className="ratio-bar-women" style={{ width: `${womenPct}%` }}>
-                    {womenPct >= 12 && <span>{womenPct}%</span>}
-                  </div>
-                  <div className="ratio-bar-men" style={{ width: `${100 - womenPct}%` }}>
-                    {100 - womenPct >= 12 && <span>{100 - womenPct}%</span>}
-                  </div>
-                </div>
-
-                <div className="ratio-exact">
-                  <label>
-                    Ajuste exacto de mujeres:
-                    <input
-                      type="number" min="0" max="100"
-                      value={womenPct}
-                      onChange={e => setDefaultWomenPct(clampPct(e.target.value))}
-                    /> %
-                  </label>
-                  <span className="muted" style={{ fontSize: '0.85rem' }}>(predeterminado 50% / 50%)</span>
-                </div>
-              </div>
-
-              {secuenciasList.length > 0 && (
-                <details className="pct-editor">
-                  <summary>Personalizar porcentaje por secuencia ({secuenciasList.length} secuencias)</summary>
-                  <div className="pct-scroll">
-                    <table className="pct-table">
-                      <thead>
-                        <tr>
-                          <th>Secuencia</th>
-                          <th>Turno</th>
-                          <th>Carrera</th>
-                          <th>Cupo</th>
-                          <th>% Mujeres</th>
-                          <th>% Hombres</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {secuenciasList.map(s => {
-                          const pct = womenPctBySeq[s.secuencia] ?? womenPct;
-                          return (
-                            <tr key={s.secuencia}>
-                              <td><strong>{s.secuencia}</strong></td>
-                              <td>{s.turno}</td>
-                              <td style={{ fontSize: '0.8rem' }}>{s.carrera}</td>
-                              <td>{s.cupo}</td>
-                              <td>
-                                <input
-                                  type="number" min="0" max="100"
-                                  value={pct}
-                                  onChange={e => setWomenPctBySeq({ ...womenPctBySeq, [s.secuencia]: clampPct(e.target.value) })}
-                                />
-                              </td>
-                              <td>{100 - pct}%</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                  {Object.keys(womenPctBySeq).length > 0 && (
-                    <button className="btn-outline" onClick={() => setWomenPctBySeq({})}>
-                      Restablecer todos al {womenPct}%
-                    </button>
+              <input
+                type="file"
+                accept=".xlsx, .xls"
+                ref={fileAspirantesRef}
+                style={{ display: 'none' }}
+                onChange={handleAspirantesSelect}
+              />
+              <button
+                className="btn-file"
+                onClick={() => fileAspirantesRef.current?.click()}
+                disabled={!termId || isUploadingAlumnos}
+              >
+                {isUploadingAlumnos ? 'Subiendo…' : 'Seleccionar archivo'}
+              </button>
+              <span className={`file-name ${aspirantesFile ? 'has-file' : ''}`}>
+                {aspirantesFile ? aspirantesFile.name : 'Ningún archivo seleccionado'}
+              </span>
+              {alumnosResumen && (
+                <div className="panel" style={{ marginTop: '0.75rem' }}>
+                  <p>Total en archivo: {alumnosResumen.total} · Insertados: {alumnosResumen.insertados} ·
+                    {' '}Duplicados: {alumnosResumen.duplicados.length} · Fallidos: {alumnosResumen.fallidos.length} ·
+                    {' '}Omitidos antes de enviar: {alumnosResumen.omitidosLocal.length}</p>
+                  {(alumnosResumen.fallidos.length > 0 || alumnosResumen.omitidosLocal.length > 0) && (
+                    <details>
+                      <summary>Ver detalle de los que no se insertaron</summary>
+                      <ul>
+                        {alumnosResumen.fallidos.map((f, i) => <li key={`f${i}`}>{f.pr}: {f.motivo}</li>)}
+                        {alumnosResumen.omitidosLocal.map((o, i) => <li key={`o${i}`}>{o.pr ?? '(sin PR)'}: {o.motivo}</li>)}
+                      </ul>
+                    </details>
                   )}
-                </details>
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* Paso 4: Conteo */}
+          <section className="step-card">
+            <div className="step-head">
+              <span className="step-num">4</span>
+              <div className="step-title">
+                <h3>Conteo por carrera</h3>
+                <p className="muted">Revisa cuántos alumnos hay registrados antes de asignar grupos.</p>
+              </div>
+            </div>
+            <div className="step-body">
+              <button className="btn-file" onClick={handleConteo} disabled={!termId || isLoadingConteo}>
+                {isLoadingConteo ? 'Consultando…' : 'Ver conteo'}
+              </button>
+              {conteo && (
+                <div className="table-scroll" style={{ marginTop: '0.75rem' }}>
+                  <table className="students-table">
+                    <thead>
+                      <tr><th>Carrera</th><th>Total</th><th>Hombres</th><th>Mujeres</th></tr>
+                    </thead>
+                    <tbody>
+                      {conteo.carreras.map((c) => (
+                        <tr key={c.idCarrera}>
+                          <td>{c.descripcion}</td><td>{c.total}</td><td>{c.hombres}</td><td>{c.mujeres}</td>
+                        </tr>
+                      ))}
+                      <tr><td><strong>Total</strong></td><td>{conteo.total}</td><td>{conteo.hombres}</td><td>{conteo.mujeres}</td></tr>
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
           </section>
 
           <button
             className="btn-generate"
-            onClick={handleGenerateExcel}
-            disabled={isGenerating || !aspirantesFile || !secuenciasFile}
+            onClick={handleAsignarYExportar}
+            disabled={isAsignando || !termId}
           >
-            {isGenerating ? 'Generando…' : 'Procesar y Descargar'}
+            {isAsignando ? 'Asignando…' : 'Asignar grupos y exportar Excel'}
           </button>
         </div>
       </main>
 
-      {/* Botón flotante para cambiar entre tema claro y oscuro */}
       <button
         className="theme-toggle"
         onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
