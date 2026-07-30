@@ -1,7 +1,15 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { TurnsService } from './turns.service.js';
 import { errorToStatusCode } from '../../shared/errors/index.js';
-import type { CreateAlumnosBody, CreateGruposBody, TermIdQuery } from './turns.schema.js';
+import type {
+  AlumnoPrParams,
+  AlumnosQuery,
+  CreateAlumnosBody,
+  CreateGruposBody,
+  DomicilioRegistro,
+  TermIdQuery,
+  UpdateGrupoBody,
+} from './turns.schema.js';
 
 export type TurnsController = {
   listCarreras: (request: FastifyRequest, reply: FastifyReply) => Promise<FastifyReply>;
@@ -9,12 +17,28 @@ export type TurnsController = {
     request: FastifyRequest<{ Querystring: TermIdQuery; Body: CreateGruposBody }>,
     reply: FastifyReply,
   ) => Promise<FastifyReply>;
-  listGrupos: (
-    request: FastifyRequest<{ Querystring: TermIdQuery }>,
+  queryAlumnos: (
+    request: FastifyRequest<{ Querystring: AlumnosQuery }>,
     reply: FastifyReply,
   ) => Promise<FastifyReply>;
   createAlumnos: (
     request: FastifyRequest<{ Querystring: TermIdQuery; Body: CreateAlumnosBody }>,
+    reply: FastifyReply,
+  ) => Promise<FastifyReply>;
+  updateDomicilio: (
+    request: FastifyRequest<{
+      Params: AlumnoPrParams;
+      Querystring: TermIdQuery;
+      Body: DomicilioRegistro;
+    }>,
+    reply: FastifyReply,
+  ) => Promise<FastifyReply>;
+  updateGrupo: (
+    request: FastifyRequest<{
+      Params: AlumnoPrParams;
+      Querystring: TermIdQuery;
+      Body: UpdateGrupoBody;
+    }>,
     reply: FastifyReply,
   ) => Promise<FastifyReply>;
   countAlumnos: (
@@ -50,8 +74,8 @@ export const createTurnsController = (service: TurnsService): TurnsController =>
     return reply.status(201).send(result.value);
   },
 
-  listGrupos: async (request, reply) => {
-    const result = await service.listGrupos(request.query.termId);
+  queryAlumnos: async (request, reply) => {
+    const result = await service.queryAlumnos(request.query);
     if (!result.ok) {
       return reply.status(errorToStatusCode(result.error.code)).send({
         code: result.error.code,
@@ -70,6 +94,32 @@ export const createTurnsController = (service: TurnsService): TurnsController =>
       });
     }
     return reply.status(201).send(result.value);
+  },
+
+  updateDomicilio: async (request, reply) => {
+    const result = await service.updateDomicilio(request.params.pr, request.query.termId, request.body);
+    if (!result.ok) {
+      return reply.status(errorToStatusCode(result.error.code)).send({
+        code: result.error.code,
+        message: result.error.message,
+      });
+    }
+    return reply.status(200).send(result.value);
+  },
+
+  updateGrupo: async (request, reply) => {
+    const result = await service.updateGrupo(
+      request.params.pr,
+      request.query.termId,
+      request.body.idGrupo,
+    );
+    if (!result.ok) {
+      return reply.status(errorToStatusCode(result.error.code)).send({
+        code: result.error.code,
+        message: result.error.message,
+      });
+    }
+    return reply.status(200).send(result.value);
   },
 
   countAlumnos: async (request, reply) => {

@@ -6,12 +6,14 @@ import { queryRows, queryOne, execute, withTransaction } from '../../infra/db/qu
 import { parseDateDDMMYYYY } from '../../shared/dates/parse-date.js';
 import type {
   AlumnoRegistroInput,
+  AlumnoRow,
+  AlumnosQuery,
   Carrera,
   ConteoAlumnosResponse,
   DomicilioRegistro,
   GrupoCreated,
   GrupoInput,
-  GrupoListItem,
+  UpdateDomicilioResponse,
 } from './turns.schema.js';
 
 export type InsertAlumnoOutcome =
@@ -25,17 +27,29 @@ export type AsignarGruposResult = {
   sinGrupo: number;
 };
 
+export type UpdateGrupoOutcome =
+  | { status: 'alumno_not_found' }
+  | { status: 'grupo_not_found' }
+  | { status: 'ok'; pr: string; idGrupo: number | null };
+
 export type TurnsRepository = {
   listCarreras: () => Promise<Carrera[]>;
   termExists: (termId: number) => Promise<boolean>;
   findExistingSecuencias: (termId: number, secuencias: string[]) => Promise<string[]>;
   insertGrupos: (termId: number, grupos: GrupoInput[]) => Promise<GrupoCreated[]>;
-  listGrupos: (termId: number) => Promise<GrupoListItem[]>;
+  queryAlumnos: (query: AlumnosQuery) => Promise<AlumnoRow[]>;
   insertAlumno: (
     termId: number,
     alumno: AlumnoRegistroInput,
     reference: GeoPoint,
   ) => Promise<InsertAlumnoOutcome>;
+  updateDomicilio: (
+    pr: string,
+    termId: number,
+    domicilio: DomicilioRegistro,
+    reference: GeoPoint,
+  ) => Promise<UpdateDomicilioResponse | null>;
+  updateGrupo: (pr: string, termId: number, idGrupo: number | null) => Promise<UpdateGrupoOutcome>;
   countByGenero: (termId: number) => Promise<ConteoAlumnosResponse>;
   assignGroups: (termId: number) => Promise<AsignarGruposResult>;
 };
@@ -124,14 +138,6 @@ type GrupoRow = RowDataPacket & {
   TURNO: string;
   ID_CARRERA: number;
 };
-type GrupoListRow = RowDataPacket & {
-  ID_GRUPO: number;
-  SECUENCIA: string;
-  CUPO: number;
-  TURNO: string;
-  ID_CARRERA: number;
-  DESCRIPCION: string;
-};
 type AlumnoAsignacionRow = RowDataPacket & {
   PRE_REGISTRO: string;
   GENERO: string;
@@ -139,13 +145,26 @@ type AlumnoAsignacionRow = RowDataPacket & {
   ID_CARRERA: number;
   DISTANCIA_METROS: string | number | null;
 };
-type GrupoAlumnoRow = AlumnoAsignacionRow & { NOMBRE: string; ID_GRUPO: number };
+type AlumnoQueryRow = RowDataPacket & {
+  PRE_REGISTRO: string;
+  NOMBRE: string;
+  GENERO: string;
+  PROMEDIO: string | number | null;
+  DISTANCIA_METROS: string | number | null;
+  ID_CARRERA: number;
+  CARRERA: string;
+  ID_GRUPO: number | null;
+  SECUENCIA: string | null;
+  TURNO: string | null;
+};
 type ConteoRow = RowDataPacket & {
   ID_CARRERA: number;
   DESCRIPCION: string;
   GENERO: string;
   TOTAL: number;
 };
+type DomicilioIdRow = RowDataPacket & { ID_DOMICILIO: number };
+type GrupoIdRow = RowDataPacket & { ID_GRUPO: number };
 
 const generoRank = (genero: string): number => (genero === 'F' ? 0 : 1);
 
@@ -231,52 +250,48 @@ export const createTurnsRepository = (db: DbPool, osrm: OsrmClient): TurnsReposi
       return created;
     }),
 
-  listGrupos: async (termId) => {
-    const rows = await queryRows<GrupoListRow>(
-      db,
-      `SELECT g.ID_GRUPO, g.SECUENCIA, g.CUPO, g.TURNO, g.ID_CARRERA, c.DESCRIPCION
-       FROM \`SIGE_GRUPOS\` g
-       JOIN \`SIGE_CCARRERAS\` c ON c.ID_CARRERA = g.ID_CARRERA
-       WHERE g.ID_CICLO_ESCOLAR = ?
-       ORDER BY g.ID_CARRERA, g.TURNO ASC, g.SECUENCIA ASC`,
-      [termId],
-    );
+  queryAlumnos: async (query) => {
+    const conditions = ['d.ID_CICLO_ESCOLAR = ?'];
+    const params: (string | number)[] = [query.termId];
 
-    const alumnoRows = await queryRows<GrupoAlumnoRow>(
-      db,
-      `SELECT d.PRE_REGISTRO, d.NOMBRE, d.GENERO, d.PROMEDIO, d.ID_CARRERA, d.ID_GRUPO, i.DISTANCIA_METROS
-       FROM \`SIGE_DATOS_INGRESO\` d
-       LEFT JOIN \`SIGE_INFO_DISTANCIA\` i ON i.PRE_REGISTRO = d.PRE_REGISTRO
-       WHERE d.ID_CICLO_ESCOLAR = ? AND d.ID_GRUPO IS NOT NULL`,
-      [termId],
-    );
-
-    const alumnosPorGrupo = new Map<number, GrupoAlumnoRow[]>();
-    for (const row of alumnoRows) {
-      const list = alumnosPorGrupo.get(row.ID_GRUPO);
-      if (list === undefined) {
-        alumnosPorGrupo.set(row.ID_GRUPO, [row]);
-      } else {
-        list.push(row);
-      }
+    if (query.sinAsignar === true) {
+      conditions.push('d.ID_GRUPO IS NULL');
     }
 
+    if (query.carrera !== undefined && query.carrera.length > 0) {
+      conditions.push(`d.ID_CARRERA IN (${query.carrera.map(() => '?').join(', ')})`);
+      params.push(...query.carrera);
+    }
+
+    if (query.secuencia !== undefined && query.secuencia.length > 0) {
+      conditions.push(`g.SECUENCIA IN (${query.secuencia.map(() => '?').join(', ')})`);
+      params.push(...query.secuencia);
+    }
+
+    const rows = await queryRows<AlumnoQueryRow>(
+      db,
+      `SELECT d.PRE_REGISTRO, d.NOMBRE, d.GENERO, d.PROMEDIO, i.DISTANCIA_METROS,
+              d.ID_CARRERA, c.DESCRIPCION AS CARRERA, d.ID_GRUPO, g.SECUENCIA, g.TURNO
+       FROM \`SIGE_DATOS_INGRESO\` d
+       JOIN \`SIGE_CCARRERAS\` c ON c.ID_CARRERA = d.ID_CARRERA
+       LEFT JOIN \`SIGE_GRUPOS\` g ON g.ID_GRUPO = d.ID_GRUPO
+       LEFT JOIN \`SIGE_INFO_DISTANCIA\` i ON i.PRE_REGISTRO = d.PRE_REGISTRO
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY c.DESCRIPCION, g.TURNO, g.SECUENCIA, d.NOMBRE`,
+      params,
+    );
+
     return rows.map((row) => ({
-      id: row.ID_GRUPO,
-      secuencia: row.SECUENCIA,
-      cupo: row.CUPO,
-      turno: row.TURNO,
+      pr: row.PRE_REGISTRO,
+      nombre: row.NOMBRE,
+      genero: row.GENERO,
+      promedio: row.PROMEDIO === null ? null : Number(row.PROMEDIO),
+      distanceMeters: row.DISTANCIA_METROS === null ? null : Number(row.DISTANCIA_METROS),
       idCarrera: row.ID_CARRERA,
-      carrera: row.DESCRIPCION,
-      alumnos: (alumnosPorGrupo.get(row.ID_GRUPO) ?? [])
-        .sort(compareAlumnoPriority)
-        .map((alumno) => ({
-          pr: alumno.PRE_REGISTRO,
-          nombre: alumno.NOMBRE,
-          genero: alumno.GENERO,
-          promedio: alumno.PROMEDIO === null ? null : Number(alumno.PROMEDIO),
-          distanceMeters: alumno.DISTANCIA_METROS === null ? null : Number(alumno.DISTANCIA_METROS),
-        })),
+      carrera: row.CARRERA,
+      idGrupo: row.ID_GRUPO,
+      secuencia: row.SECUENCIA,
+      turno: row.TURNO,
     }));
   },
 
@@ -352,6 +367,81 @@ export const createTurnsRepository = (db: DbPool, osrm: OsrmClient): TurnsReposi
         motivo: cause instanceof Error ? cause.message : 'Error desconocido',
       };
     }
+  },
+
+  updateDomicilio: async (pr, termId, domicilio, reference) => {
+    const alumno = await queryOne<DomicilioIdRow>(
+      db,
+      'SELECT ID_DOMICILIO FROM `SIGE_DATOS_INGRESO` WHERE PRE_REGISTRO = ? AND ID_CICLO_ESCOLAR = ? LIMIT 1',
+      [pr, termId],
+    );
+    if (alumno === null) {
+      return null;
+    }
+
+    const match = await matchColonia(db, domicilio);
+
+    let distancia: { metros: number; nivel: 1 | 2 | 3 | 4 } | null = null;
+    if (match !== null) {
+      const route = await osrm.route(match.point, reference);
+      if (route !== null) {
+        distancia = { metros: route.meters, nivel: match.nivel };
+      }
+    }
+
+    await withTransaction(db, async (conn) => {
+      await execute(
+        conn,
+        'UPDATE `SIGE_DOMICILIOS` SET `CALLE` = ?, `NUMERO` = ?, `ID_COLONIA` = ? WHERE ID_DOMICILIO = ?',
+        [domicilio.CALLE, domicilio.NUMERO, match?.idColonia ?? null, alumno.ID_DOMICILIO],
+      );
+
+      await execute(conn, 'DELETE FROM `SIGE_INFO_DISTANCIA` WHERE PRE_REGISTRO = ?', [pr]);
+
+      if (distancia !== null) {
+        await execute(
+          conn,
+          'INSERT INTO `SIGE_INFO_DISTANCIA` (`DISTANCIA_METROS`, `NIVEL`, `PRE_REGISTRO`) VALUES (?, ?, ?)',
+          [distancia.metros, distancia.nivel, pr],
+        );
+      }
+    });
+
+    return {
+      pr,
+      domicilio,
+      distanceMeters: distancia?.metros ?? null,
+      nivel: distancia?.nivel ?? null,
+    };
+  },
+
+  updateGrupo: async (pr, termId, idGrupo) => {
+    const alumno = await queryOne<IdRow>(
+      db,
+      'SELECT PRE_REGISTRO FROM `SIGE_DATOS_INGRESO` WHERE PRE_REGISTRO = ? AND ID_CICLO_ESCOLAR = ? LIMIT 1',
+      [pr, termId],
+    );
+    if (alumno === null) {
+      return { status: 'alumno_not_found' };
+    }
+
+    if (idGrupo !== null) {
+      const grupo = await queryOne<GrupoIdRow>(
+        db,
+        'SELECT ID_GRUPO FROM `SIGE_GRUPOS` WHERE ID_GRUPO = ? AND ID_CICLO_ESCOLAR = ? LIMIT 1',
+        [idGrupo, termId],
+      );
+      if (grupo === null) {
+        return { status: 'grupo_not_found' };
+      }
+    }
+
+    await execute(db, 'UPDATE `SIGE_DATOS_INGRESO` SET `ID_GRUPO` = ? WHERE PRE_REGISTRO = ?', [
+      idGrupo,
+      pr,
+    ]);
+
+    return { status: 'ok', pr, idGrupo };
   },
 
   countByGenero: async (termId) => {

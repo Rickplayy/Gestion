@@ -65,42 +65,9 @@ export const createGruposRouteSchema = {
   },
 };
 
-export const GrupoAlumnoSchema = Type.Object({
-  pr: Type.String(),
-  nombre: Type.String(),
-  genero: Type.String(),
-  promedio: Type.Union([Type.Number(), Type.Null()]),
-  distanceMeters: Type.Union([Type.Number(), Type.Null()]),
-});
-
-export const GrupoListItemSchema = Type.Object({
-  id: Type.Integer(),
-  secuencia: Type.String(),
-  cupo: Type.Integer(),
-  turno: Type.String(),
-  idCarrera: Type.Integer(),
-  carrera: Type.String(),
-  alumnos: Type.Array(GrupoAlumnoSchema),
-});
-
-export const ListGruposResponseSchema = Type.Object({
-  items: Type.Array(GrupoListItemSchema),
-});
-
-export const listGruposRouteSchema = {
-  querystring: TermIdQuerySchema,
-  response: {
-    200: ListGruposResponseSchema,
-    404: ErrorResponseSchema,
-  },
-};
-
 export type GrupoInput = Static<typeof GrupoInputSchema>;
 export type CreateGruposBody = Static<typeof CreateGruposBodySchema>;
 export type GrupoCreated = Static<typeof GrupoCreatedSchema>;
-export type GrupoAlumno = Static<typeof GrupoAlumnoSchema>;
-export type GrupoListItem = Static<typeof GrupoListItemSchema>;
-export type ListGruposResponse = Static<typeof ListGruposResponseSchema>;
 export type CreateGruposResponse = Static<typeof CreateGruposResponseSchema>;
 
 // --- Registro de alumnos (persistido) ---
@@ -206,3 +173,92 @@ export const asignarGruposRouteSchema = {
 };
 
 export type AsignarGruposResponse = Static<typeof AsignarGruposResponseSchema>;
+
+// --- Edición puntual de un alumno ---
+
+export const AlumnoPrParamsSchema = Type.Object({
+  pr: Type.String({ minLength: 1 }),
+});
+
+export type AlumnoPrParams = Static<typeof AlumnoPrParamsSchema>;
+
+export const UpdateDomicilioResponseSchema = Type.Object({
+  pr: Type.String(),
+  domicilio: DomicilioRegistroSchema,
+  distanceMeters: Type.Union([Type.Number(), Type.Null()]),
+  nivel: Type.Union([Type.Literal(1), Type.Literal(2), Type.Literal(3), Type.Literal(4), Type.Null()]),
+});
+
+export const updateDomicilioRouteSchema = {
+  params: AlumnoPrParamsSchema,
+  querystring: TermIdQuerySchema,
+  body: DomicilioRegistroSchema,
+  response: {
+    200: UpdateDomicilioResponseSchema,
+    404: ErrorResponseSchema,
+  },
+};
+
+export type UpdateDomicilioResponse = Static<typeof UpdateDomicilioResponseSchema>;
+
+export const UpdateGrupoBodySchema = Type.Object({
+  idGrupo: Type.Union([Type.Integer({ minimum: 1 }), Type.Null()]),
+});
+
+export const UpdateGrupoResponseSchema = Type.Object({
+  pr: Type.String(),
+  idGrupo: Type.Union([Type.Integer(), Type.Null()]),
+});
+
+export const updateGrupoRouteSchema = {
+  params: AlumnoPrParamsSchema,
+  querystring: TermIdQuerySchema,
+  body: UpdateGrupoBodySchema,
+  response: {
+    200: UpdateGrupoResponseSchema,
+    404: ErrorResponseSchema,
+  },
+};
+
+export type UpdateGrupoBody = Static<typeof UpdateGrupoBodySchema>;
+export type UpdateGrupoResponse = Static<typeof UpdateGrupoResponseSchema>;
+
+// --- Consulta de alumnos con filtros (secuencia, carrera, sin asignar) ---
+
+export const AlumnosQuerySchema = Type.Object({
+  termId: Type.Integer({ minimum: 1 }),
+  secuencia: Type.Optional(Type.Array(Type.String())),
+  carrera: Type.Optional(Type.Array(Type.Integer())),
+  sinAsignar: Type.Optional(Type.Boolean()),
+});
+
+export type AlumnosQuery = Static<typeof AlumnosQuerySchema>;
+
+export const AlumnoRowSchema = Type.Object({
+  pr: Type.String(),
+  nombre: Type.String(),
+  genero: Type.String(),
+  promedio: Type.Union([Type.Number(), Type.Null()]),
+  distanceMeters: Type.Union([Type.Number(), Type.Null()]),
+  idCarrera: Type.Integer(),
+  carrera: Type.String(),
+  idGrupo: Type.Union([Type.Integer(), Type.Null()]),
+  secuencia: Type.Union([Type.String(), Type.Null()]),
+  turno: Type.Union([Type.String(), Type.Null()]),
+});
+
+export const AlumnosQueryResponseSchema = Type.Object({
+  items: Type.Array(AlumnoRowSchema),
+  total: Type.Integer(),
+});
+
+export const queryAlumnosRouteSchema = {
+  querystring: AlumnosQuerySchema,
+  response: {
+    200: AlumnosQueryResponseSchema,
+    404: ErrorResponseSchema,
+  },
+};
+
+export type AlumnoRow = Static<typeof AlumnoRowSchema>;
+export type AlumnosQueryResponse = Static<typeof AlumnosQueryResponseSchema>;

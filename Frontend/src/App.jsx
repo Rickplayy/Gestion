@@ -200,26 +200,21 @@ function App() {
     setIsAsignando(true);
     try {
       await api.asignarGrupos(termId);
-      const grupos = await api.getGrupos(termId);
+      const alumnos = await api.queryAlumnos(termId);
 
-      const rows = [];
-      for (const grupo of grupos.items) {
-        for (const alumno of grupo.alumnos) {
-          rows.push({
-            Secuencia: grupo.secuencia,
-            Turno: grupo.turno === 'M' ? 'Matutino' : 'Vespertino',
-            Carrera: grupo.carrera,
-            PR: alumno.pr,
-            Nombre: alumno.nombre,
-            Genero: alumno.genero === 'F' ? 'Mujer' : 'Hombre',
-            Promedio: alumno.promedio ?? '',
-            DistanciaKm: alumno.distanceMeters != null ? Math.round(alumno.distanceMeters / 100) / 10 : '',
-          });
-        }
-      }
+      const rows = alumnos.items.map((alumno) => ({
+        Secuencia: alumno.secuencia ?? 'SIN GRUPO',
+        Turno: alumno.turno === 'M' ? 'Matutino' : alumno.turno === 'V' ? 'Vespertino' : '',
+        Carrera: alumno.carrera,
+        PR: alumno.pr,
+        Nombre: alumno.nombre,
+        Genero: alumno.genero === 'F' ? 'Mujer' : 'Hombre',
+        Promedio: alumno.promedio ?? '',
+        DistanciaKm: alumno.distanceMeters != null ? Math.round(alumno.distanceMeters / 100) / 10 : '',
+      }));
 
       if (rows.length === 0) {
-        throw new Error('No quedó ningún alumno asignado a un grupo.');
+        throw new Error('No hay alumnos registrados en este ciclo.');
       }
 
       const saved = await exportToExcel(rows, 'gruposAsignados.xlsx', target);

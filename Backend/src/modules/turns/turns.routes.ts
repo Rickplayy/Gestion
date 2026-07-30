@@ -9,10 +9,16 @@ import {
   createAlumnosRouteSchema,
   createGruposRouteSchema,
   listCarrerasRouteSchema,
-  listGruposRouteSchema,
+  queryAlumnosRouteSchema,
+  updateDomicilioRouteSchema,
+  updateGrupoRouteSchema,
+  type AlumnoPrParams,
+  type AlumnosQuery,
   type CreateAlumnosBody,
   type CreateGruposBody,
+  type DomicilioRegistro,
   type TermIdQuery,
+  type UpdateGrupoBody,
 } from './turns.schema.js';
 
 export const turnsRoutes = async (fastify: FastifyInstance): Promise<void> => {
@@ -37,16 +43,29 @@ export const turnsRoutes = async (fastify: FastifyInstance): Promise<void> => {
     controller.createGrupos,
   );
 
-  fastify.get<{ Querystring: TermIdQuery }>(
-    '/terms/turns/grupos',
-    { schema: listGruposRouteSchema, preHandler: [fastify.authenticate] },
-    controller.listGrupos,
+  // Endpoint principal de consulta: filtros combinables por secuencia, carrera y sin asignar.
+  fastify.get<{ Querystring: AlumnosQuery }>(
+    '/terms/turns/alumnos',
+    { schema: queryAlumnosRouteSchema, preHandler: [fastify.authenticate] },
+    controller.queryAlumnos,
   );
 
   fastify.post<{ Querystring: TermIdQuery; Body: CreateAlumnosBody }>(
     '/terms/turns/alumnos',
     { schema: createAlumnosRouteSchema, preHandler: [fastify.authenticate] },
     controller.createAlumnos,
+  );
+
+  fastify.patch<{ Params: AlumnoPrParams; Querystring: TermIdQuery; Body: DomicilioRegistro }>(
+    '/terms/turns/alumnos/:pr/domicilio',
+    { schema: updateDomicilioRouteSchema, preHandler: [fastify.authenticate] },
+    controller.updateDomicilio,
+  );
+
+  fastify.patch<{ Params: AlumnoPrParams; Querystring: TermIdQuery; Body: UpdateGrupoBody }>(
+    '/terms/turns/alumnos/:pr/grupo',
+    { schema: updateGrupoRouteSchema, preHandler: [fastify.authenticate] },
+    controller.updateGrupo,
   );
 
   fastify.get<{ Querystring: TermIdQuery }>(

@@ -5,13 +5,17 @@ import { domainError, DomainErrorCode, type DomainError } from '../../shared/err
 import type {
   AlumnoFallido,
   AlumnoRegistroInput,
+  AlumnosQuery,
+  AlumnosQueryResponse,
   AsignarGruposResponse,
   CarrerasResponse,
   ConteoAlumnosResponse,
   CreateAlumnosResponse,
   CreateGruposResponse,
+  DomicilioRegistro,
   GrupoInput,
-  ListGruposResponse,
+  UpdateDomicilioResponse,
+  UpdateGrupoResponse,
 } from './turns.schema.js';
 
 export type TurnsService = {
@@ -20,17 +24,29 @@ export type TurnsService = {
     termId: number,
     grupos: GrupoInput[],
   ) => Promise<Result<CreateGruposResponse, DomainError>>;
-  listGrupos: (termId: number) => Promise<Result<ListGruposResponse, DomainError>>;
+  queryAlumnos: (query: AlumnosQuery) => Promise<Result<AlumnosQueryResponse, DomainError>>;
   createAlumnos: (
     termId: number,
     alumnos: AlumnoRegistroInput[],
   ) => Promise<Result<CreateAlumnosResponse, DomainError>>;
+  updateDomicilio: (
+    pr: string,
+    termId: number,
+    domicilio: DomicilioRegistro,
+  ) => Promise<Result<UpdateDomicilioResponse, DomainError>>;
+  updateGrupo: (
+    pr: string,
+    termId: number,
+    idGrupo: number | null,
+  ) => Promise<Result<UpdateGrupoResponse, DomainError>>;
   countAlumnos: (termId: number) => Promise<Result<ConteoAlumnosResponse, DomainError>>;
   assignGroups: (termId: number) => Promise<Result<AsignarGruposResponse, DomainError>>;
 };
 
 const WORK_CONCURRENCY = 10;
 const TERM_NOT_FOUND = 'El ciclo escolar indicado no existe';
+const ALUMNO_NOT_FOUND = 'El alumno indicado no existe en este ciclo escolar';
+const GRUPO_NOT_FOUND = 'El grupo indicado no existe en este ciclo escolar';
 
 const mapWithConcurrency = async <T, R>(
   items: T[],
@@ -99,13 +115,13 @@ export const createTurnsService = (
     return ok({ items: created });
   },
 
-  listGrupos: async (termId) => {
-    if (!(await repository.termExists(termId))) {
+  queryAlumnos: async (query) => {
+    if (!(await repository.termExists(query.termId))) {
       return err(domainError(DomainErrorCode.NotFound, TERM_NOT_FOUND));
     }
 
-    const items = await repository.listGrupos(termId);
-    return ok({ items });
+    const items = await repository.queryAlumnos(query);
+    return ok({ items, total: items.length });
   },
 
   createAlumnos: async (termId, alumnos) => {
@@ -133,6 +149,35 @@ export const createTurnsService = (
     });
 
     return ok({ total: alumnos.length, insertados, duplicados, fallidos });
+  },
+
+  updateDomicilio: async (pr, termId, domicilio) => {
+    if (!(await repository.termExists(termId))) {
+      return err(domainError(DomainErrorCode.NotFound, TERM_NOT_FOUND));
+    }
+
+    const result = await repository.updateDomicilio(pr, termId, domicilio, reference);
+    if (result === null) {
+      return err(domainError(DomainErrorCode.NotFound, ALUMNO_NOT_FOUND));
+    }
+
+    return ok(result);
+  },
+
+  updateGrupo: async (pr, termId, idGrupo) => {
+    if (!(await repository.termExists(termId))) {
+      return err(domainError(DomainErrorCode.NotFound, TERM_NOT_FOUND));
+    }
+
+    const outcome = await repository.updateGrupo(pr, termId, idGrupo);
+    if (outcome.status === 'alumno_not_found') {
+      return err(domainError(DomainErrorCode.NotFound, ALUMNO_NOT_FOUND));
+    }
+    if (outcome.status === 'grupo_not_found') {
+      return err(domainError(DomainErrorCode.NotFound, GRUPO_NOT_FOUND));
+    }
+
+    return ok({ pr: outcome.pr, idGrupo: outcome.idGrupo });
   },
 
   countAlumnos: async (termId) => {

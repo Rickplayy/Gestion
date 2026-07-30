@@ -40,9 +40,27 @@ export const api = {
   createTerm: (descripcion) => request('/terms', { method: 'POST', body: { descripcion } }),
   createGrupos: (termId, grupos) =>
     request(`/terms/turns/grupos?termId=${termId}`, { method: 'POST', body: grupos }),
-  getGrupos: (termId) => request(`/terms/turns/grupos?termId=${termId}`),
   createAlumnos: (termId, alumnos) =>
     request(`/terms/turns/alumnos?termId=${termId}`, { method: 'POST', body: alumnos }),
+  // filters: { secuencia: string[], carrera: number[], sinAsignar: boolean }
+  queryAlumnos: (termId, filters = {}) => {
+    const params = new URLSearchParams();
+    params.set('termId', termId);
+    for (const s of filters.secuencia ?? []) params.append('secuencia', s);
+    for (const c of filters.carrera ?? []) params.append('carrera', c);
+    if (filters.sinAsignar !== undefined) params.set('sinAsignar', String(filters.sinAsignar));
+    return request(`/terms/turns/alumnos?${params.toString()}`);
+  },
+  updateDomicilio: (termId, pr, domicilio) =>
+    request(`/terms/turns/alumnos/${encodeURIComponent(pr)}/domicilio?termId=${termId}`, {
+      method: 'PATCH',
+      body: domicilio,
+    }),
+  updateGrupoAlumno: (termId, pr, idGrupo) =>
+    request(`/terms/turns/alumnos/${encodeURIComponent(pr)}/grupo?termId=${termId}`, {
+      method: 'PATCH',
+      body: { idGrupo },
+    }),
   getConteo: (termId) => request(`/terms/turns/alumnos/conteo?termId=${termId}`),
   asignarGrupos: (termId) => request(`/terms/turns/grupos/asignar?termId=${termId}`),
 };
