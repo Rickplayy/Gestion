@@ -1,6 +1,8 @@
 import { limpiar, readSheetRows, findHeaderRow } from "./excelUtils";
 
-function extraerDomicilio(domicilio) {
+// Se exporta para que el generador de grupos pueda sacar colonia/delegación/CP
+// del domicilio y mandarlos a geocodificar (ver utils/geo/).
+export function extraerDomicilio(domicilio) {
   const d = limpiar(domicilio);
 
   const regex =

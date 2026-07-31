@@ -312,6 +312,50 @@ input, select, textarea {
   font-style: normal;
 }
 
+/* ----- Ciclo escolar (paso 1) ----- */
+/* El input global es width:100%, que dentro del .step-body (flex) empujaría el
+   resto a otra línea: aquí se acota para que conviva con el selector de archivo. */
+.ciclo-field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  flex-basis: 100%;
+}
+
+.ciclo-field input {
+  width: auto;
+  max-width: 160px;
+  padding: 0.5rem 0.65rem;
+  font-weight: 500;
+}
+
+/* ----- Prioridad por distancia (paso 4) ----- */
+.switch-field {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.95rem;
+  cursor: pointer;
+  flex-basis: 100%;
+}
+
+.switch-field input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  cursor: pointer;
+  accent-color: var(--ipn-maroon);
+}
+
+.distancia-nota {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
 
 /* ----- Control visual de distribución por sexo (paso 3) ----- */
 .ratio-control {

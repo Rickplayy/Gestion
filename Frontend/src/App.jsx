@@ -8,7 +8,19 @@ import {
   discardSaveTarget,
   normalizeCareer,
 } from './utils/groupGenerator';
+import { createDistanceService, DEFAULT_REFERENCE } from './utils/geo/distance';
 import './App.css';
+
+// Configuración del cálculo de distancias (ver Frontend/.env.example).
+const GEO_CONFIG = {
+  osrmUrl: import.meta.env.VITE_OSRM_URL || '',
+  geocoderUrl: import.meta.env.VITE_NOMINATIM_URL || undefined,
+  minIntervalMs: Number(import.meta.env.VITE_GEOCODER_INTERVAL_MS) || undefined,
+  reference: {
+    lat: Number(import.meta.env.VITE_REF_LAT) || DEFAULT_REFERENCE.lat,
+    lon: Number(import.meta.env.VITE_REF_LON) || DEFAULT_REFERENCE.lon,
+  },
+};
 
 // Convierte los registros crudos del Excel de aspirantes a filas de alumnos
 // (nombre, boleta, sexo, carrera, dirección). Deduplica por boleta. Se usa
@@ -45,13 +57,18 @@ function App() {
   const fileGeneratorRef = useRef(null);
   const fileSecuenciasRef = useRef(null);
   const [aspirantesFile, setAspirantesFile] = useState(null);
+  const [cicloEscolar, setCicloEscolar] = useState('');
   const [secuenciasFile, setSecuenciasFile] = useState(null);
   const [secuenciasList, setSecuenciasList] = useState([]);
   const [defaultWomenPct, setDefaultWomenPct] = useState(50);
   const [womenPctBySeq, setWomenPctBySeq] = useState({});
+  const [usarDistancia, setUsarDistancia] = useState(false);
+  const [distanciaProgreso, setDistanciaProgreso] = useState(null);
   const [isSyncingAspirantes, setIsSyncingAspirantes] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'light');
+
+  const cicloValido = cicloEscolar.trim().length > 0;
 
   // Aplicar el tema al documento y recordarlo (única preferencia que se guarda)
   useEffect(() => {
@@ -107,34 +124,71 @@ function App() {
       setMessage({ text: 'Por favor selecciona ambos archivos.', type: 'error' });
       return;
     }
+    if (!cicloValido) {
+      setMessage({ text: 'Indica el ciclo escolar en el paso 1 (ej. 26-1).', type: 'error' });
+      return;
+    }
+
+    const ciclo = cicloEscolar.trim();
+    // El ciclo va en el nombre del archivo para no confundir generaciones al
+    // guardar varias en la misma carpeta.
+    const nombreArchivo = `gruposAsignados-${ciclo.replace(/[^\w.-]+/g, '_')}.xlsx`;
 
     // "Guardar como" se abre PRIMERO, dentro del click y antes de procesar:
     // tanto el diálogo como la apertura del stream de escritura dependen de la
     // activación del usuario, que expira mientras se reparten los grupos.
-    const target = await pickSaveTarget('gruposAsignados.xlsx');
+    const target = await pickSaveTarget(nombreArchivo);
     if (target?.cancelled) {
       setMessage({ text: 'Guardado cancelado.', type: 'error' });
       return;
     }
 
     setIsGenerating(true);
+    setDistanciaProgreso(null);
     setMessage({ text: 'Procesando archivos y generando secuencias...', type: 'success' });
 
     try {
       const aspirantesBuffer = await aspirantesFile.arrayBuffer();
+      const distanceService = usarDistancia ? createDistanceService(GEO_CONFIG) : null;
+
       // secuenciasList ya fue parseada al seleccionar el archivo (paso 2): se
       // reutiliza en vez de releer y re-parsear el mismo Excel de secuencias.
       const generatedData = await generateGroupsFromBuffer(aspirantesBuffer, secuenciasList, {
         defaultWomenPct: clampPct(defaultWomenPct),
         womenPctBySeq,
+        cicloEscolar: ciclo,
+        distanceService,
+        onDistanceProgress: (listos, total) => setDistanciaProgreso({ listos, total }),
       });
-      const saved = await exportToExcel(generatedData, 'gruposAsignados.xlsx', target);
-      setMessage({
-        text: saved.location === 'descargas'
-          ? `"${saved.name}" se descargó a tu carpeta de Descargas con ${generatedData.length} alumnos asignados.`
-          : `"${saved.name}" guardado con ${generatedData.length} alumnos asignados.`,
-        type: 'success',
-      });
+
+      const saved = await exportToExcel(generatedData, nombreArchivo, target);
+
+      const base = saved.location === 'descargas'
+        ? `"${saved.name}" se descargó a tu carpeta de Descargas con ${generatedData.length} alumnos asignados.`
+        : `"${saved.name}" guardado con ${generatedData.length} alumnos asignados.`;
+
+      let notaDistancia = '';
+      let tipo = 'success';
+
+      if (distanceService) {
+        const conKms = generatedData.filter(r => r.Kms !== '').length;
+        const { rechazos, ultimoEstado } = distanceService.geocoderStats;
+
+        notaDistancia = ` Distancia calculada para ${conKms} de ${generatedData.length}` +
+          (distanceService.osrmActivo ? ' (ruta real por calles).' : ' (estimada en línea recta).');
+
+        // Sin esto, un bloqueo del geocodificador se vería igual que "ningún
+        // domicilio se pudo leer", y el usuario no sabría que el problema es el
+        // servicio y no sus datos.
+        if (rechazos > 0) {
+          notaDistancia += ` El geocodificador rechazó ${rechazos} petición(es)` +
+            (ultimoEstado ? ` (HTTP ${ultimoEstado})` : '') +
+            '. Si son muchas, conviene levantar una instancia propia de Nominatim y configurarla en VITE_NOMINATIM_URL.';
+          tipo = 'error';
+        }
+      }
+
+      setMessage({ text: base + notaDistancia, type: tipo });
     } catch (err) {
       console.error(err);
       // El diálogo ya había creado el archivo vacío: se descarta en vez de
@@ -143,6 +197,7 @@ function App() {
       setMessage({ text: 'Error generando el archivo: ' + err.message, type: 'error' });
     } finally {
       setIsGenerating(false);
+      setDistanciaProgreso(null);
     }
   };
 
@@ -172,12 +227,12 @@ function App() {
           </header>
 
           {/* Paso 1 */}
-          <section className={`step-card ${aspirantesFile ? 'is-done' : ''}`}>
+          <section className={`step-card ${aspirantesFile && cicloValido ? 'is-done' : ''}`}>
             <div className="step-head">
-              <span className="step-num">{aspirantesFile ? '✓' : '1'}</span>
+              <span className="step-num">{aspirantesFile && cicloValido ? '✓' : '1'}</span>
               <div className="step-title">
-                <h3>Archivo de Aspirantes inscritos</h3>
-                <p className="muted">Se usará para asignar a los alumnos a sus grupos.</p>
+                <h3>Ciclo escolar y archivo de Aspirantes inscritos</h3>
+                <p className="muted">El ciclo identifica la generación; el archivo se usará para asignar a los alumnos a sus grupos.</p>
               </div>
             </div>
             <div className="step-body">
@@ -194,6 +249,17 @@ function App() {
               <span className={`file-name ${aspirantesFile ? 'has-file' : ''}`}>
                 {aspirantesFile ? aspirantesFile.name : 'Ningún archivo seleccionado'}
               </span>
+
+              <label className="ciclo-field">
+                <span>Ciclo escolar</span>
+                <input
+                  type="text"
+                  maxLength={50}
+                  placeholder="Ej. 26-1"
+                  value={cicloEscolar}
+                  onChange={e => setCicloEscolar(e.target.value)}
+                />
+              </label>
             </div>
           </section>
 
@@ -315,10 +381,46 @@ function App() {
             </div>
           </section>
 
+          {/* Paso 4 - Prioridad por distancia */}
+          <section className={`step-card ${usarDistancia ? 'is-done' : ''}`}>
+            <div className="step-head">
+              <span className="step-num">{usarDistancia ? '✓' : '4'}</span>
+              <div className="step-title">
+                <h3>Prioridad por distancia (opcional)</h3>
+                <p className="muted">Ubica el domicilio de cada alumno y da preferencia de turno matutino a los que viven más lejos.</p>
+              </div>
+            </div>
+            <div className="step-body">
+              <label className="switch-field">
+                <input
+                  type="checkbox"
+                  checked={usarDistancia}
+                  onChange={e => setUsarDistancia(e.target.checked)}
+                />
+                <span>Calcular distancia de cada domicilio a la escuela</span>
+              </label>
+
+              {usarDistancia && (
+                <p className="muted distancia-nota">
+                  {GEO_CONFIG.osrmUrl
+                    ? `Distancia real por calles vía OSRM (${GEO_CONFIG.osrmUrl}).`
+                    : 'Sin servidor OSRM configurado: la distancia se estima en línea recta. Sirve para ordenar por lejanía, pero no es el kilometraje exacto por calles.'}
+                  {' '}Se geocodifica solo colonia, alcaldía y CP —nunca calle y número—, y el proceso puede tardar varios minutos en la primera corrida.
+                </p>
+              )}
+
+              {distanciaProgreso && (
+                <p className="muted distancia-nota">
+                  Calculando distancias: {distanciaProgreso.listos} de {distanciaProgreso.total}…
+                </p>
+              )}
+            </div>
+          </section>
+
           <button
             className="btn-generate"
             onClick={handleGenerateExcel}
-            disabled={isGenerating || !aspirantesFile || !secuenciasFile}
+            disabled={isGenerating || !aspirantesFile || !secuenciasFile || !cicloValido}
           >
             {isGenerating ? 'Generando…' : 'Procesar y Descargar'}
           </button>

@@ -1,4 +1,5 @@
 import { limpiar, readSheetRows, findHeaderRow, getXLSX } from "./excelUtils";
+import { extraerDomicilio } from "./excelParser";
 
 export const normalizeCareer = (name) => {
   const n = String(name || '').toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -59,21 +60,90 @@ export async function extractSecuencias(buffer) {
 }
 
 // ---------------------------------------------------------------------------
-// PENDIENTE (API de kilómetros):
-// Aquí se conectará la API que calcula la distancia (Kms) del domicilio de
-// cada aspirante a la escuela. Con esa distancia se definirá la preferencia
-// de turno: entre más lejos viva, mayor prioridad para turno Matutino (AM).
+// Distancia domicilio → escuela.
 //
-// Cuando la API exista:
-//   1. Implementar la llamada dentro de enrichWithKms (recibe la lista de
-//      aspirantes con su campo `domicilio` y debe llenar `kms`).
-//   2. En generateGroupsFromBuffer, al repartir entre secuencias AM/PM,
-//      ordenar por `kms` descendente para dar preferencia AM a los lejanos.
+// Portado del backend (Backend/src/modules/turns/turns.repository.ts): el
+// domicilio se ubica en coordenadas y de ahí se saca la distancia real por
+// calles. Con esa distancia se define la preferencia de turno: entre más lejos
+// viva el alumno, mayor prioridad para turno Matutino (AM).
 // ---------------------------------------------------------------------------
-async function enrichWithKms(aspirantes) {
-  // Por ahora la distancia queda en 0 para todos.
-  return aspirantes.map(a => ({ ...a, kms: 0 }));
+
+// Fuera del catálogo con formato "... COL X DELEG Y C.P. 12345" el regex del
+// parser no saca nada. Antes de rendirse se busca cualquier CP de 5 dígitos en
+// el texto: alcanza para ubicar por código postal (nivel 3) en vez de perder al
+// alumno por completo.
+const domicilioParaGeo = (texto) => {
+  const partes = extraerDomicilio(texto);
+  if (partes.colonia || partes.delegacion || partes.cp) return partes;
+
+  const cpSuelto = String(texto || '').match(/\b(\d{5})\b/);
+  return { ...partes, cp: cpSuelto ? cpSuelto[1] : null };
+};
+
+// Mismo patrón que mapWithConcurrency() del backend: varios en paralelo, pero
+// con tope. Los domicilios ya vistos salen del cache al instante; los nuevos se
+// forman igual en la cola del geocodificador.
+const WORK_CONCURRENCY = 10;
+
+const mapWithConcurrency = async (items, limit, mapper) => {
+  const results = new Array(items.length);
+  let index = 0;
+
+  const worker = async () => {
+    while (index < items.length) {
+      const current = index++;
+      results[current] = await mapper(items[current], current);
+    }
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, () => worker()),
+  );
+  return results;
+};
+
+// Llena `kms` (kilómetros, null si no se pudo ubicar) en cada aspirante.
+// Sin servicio de distancia devuelve la lista intacta con kms en null, que es
+// justo el comportamiento previo: el reparto entonces se decide solo por
+// promedio, como antes de existir esta función.
+async function enrichWithKms(aspirantes, distanceService, onProgress) {
+  if (!distanceService) {
+    return aspirantes.map(a => ({ ...a, kms: null, distanceSource: null, nivel: null }));
+  }
+
+  let listos = 0;
+  return mapWithConcurrency(aspirantes, WORK_CONCURRENCY, async (a) => {
+    let medicion;
+    try {
+      medicion = await distanceService.measure(domicilioParaGeo(a.domicilio));
+    } catch {
+      // Un domicilio que no se puede ubicar no debe tumbar la generación
+      // completa: ese alumno se queda sin distancia y se reparte al final.
+      medicion = null;
+    }
+
+    listos += 1;
+    onProgress?.(listos, aspirantes.length);
+
+    return {
+      ...a,
+      kms: medicion ? Math.round((medicion.meters / 1000) * 100) / 100 : null,
+      distanceSource: medicion?.source ?? null,
+      nivel: medicion?.nivel ?? null,
+    };
+  });
 }
+
+// Más lejos primero; sin distancia al final; empates por promedio.
+// Equivale a compareAlumnoPriority() del backend (el sexo aquí no entra porque
+// ya se maneja con las cuotas por secuencia).
+const compararPorLejania = (a, b) => {
+  if (a.kms === null && b.kms === null) return b.promedio - a.promedio;
+  if (a.kms === null) return 1;
+  if (b.kms === null) return -1;
+  if (b.kms !== a.kms) return b.kms - a.kms;
+  return b.promedio - a.promedio;
+};
 
 /**
  * Genera la asignación de grupos.
@@ -85,9 +155,21 @@ async function enrichWithKms(aspirantes) {
  * @param options
  *   - defaultWomenPct: % de mujeres por secuencia (default 50; hombres = 100 - mujeres)
  *   - womenPctBySeq:   overrides por secuencia, ej. { "1AM10": 60 }
+ *   - cicloEscolar:    ciclo al que pertenece la generación, ej. "26-1". Acota
+ *                      el resultado igual que el ID_CICLO_ESCOLAR del backend.
+ *   - distanceService: servicio de utils/geo/distance.js. Si viene, se calcula
+ *                      la distancia de cada alumno y los más lejanos ganan turno
+ *                      matutino. Si no viene, el reparto va solo por promedio.
+ *   - onDistanceProgress: (listos, total) para que la UI muestre el avance.
  */
 export async function generateGroupsFromBuffer(aspirantesBuffer, secuencias, options = {}) {
-  const { defaultWomenPct = 50, womenPctBySeq = {} } = options;
+  const {
+    defaultWomenPct = 50,
+    womenPctBySeq = {},
+    cicloEscolar = '',
+    distanceService = null,
+    onDistanceProgress = null,
+  } = options;
 
   const rows = await readSheetRows(aspirantesBuffer, { sheetNameIncludes: 'ASPIRANTES' });
   const headerRowIndex = findHeaderRow(rows, ["BOLETA", "NOMBRE"]);
@@ -133,37 +215,62 @@ export async function generateGroupsFromBuffer(aspirantesBuffer, secuencias, opt
 
   const asignar = (student, seq) => {
     finalAssignments.push({
+      CicloEscolar: cicloEscolar,
       Boleta: student.boleta,
       Nombre: student.nombre,
       Carrera: student.carrera,
       Turno: getTurnoFromSequence(seq),
       Genero: student.genero,
       Promedio: student.promedio,
-      Kms: student.kms ?? 0,
+      // Vacío (no 0) cuando no se pudo ubicar el domicilio: un 0 se leería como
+      // "vive en la escuela" y lo mandaría hasta el principio de la fila.
+      Kms: student.kms ?? '',
       Secuencia: seq,
     });
   };
 
+  // Admisión: por promedio, dentro de cada carrera y hasta el cupo total. La
+  // distancia NO decide quién entra (eso sería injusto), solo en qué turno queda.
+  const admitidosPorCarrera = {};
   for (const carrera in recordsByCareer) {
     const seqs = seqsByCareer[carrera];
     if (!seqs || seqs.length === 0) continue; // carrera sin secuencias en el archivo
 
-    // Ordenar de mayor a menor promedio y admitir hasta el cupo total
-    const ordenados = recordsByCareer[carrera].sort((a, b) => b.promedio - a.promedio);
+    const ordenados = [...recordsByCareer[carrera]].sort((a, b) => b.promedio - a.promedio);
     const cupoTotal = seqs.reduce((sum, s) => sum + s.cupo, 0);
-    let admitidos = ordenados.slice(0, cupoTotal);
+    admitidosPorCarrera[carrera] = ordenados.slice(0, cupoTotal);
+  }
 
-    // Hueco para la API de kms (hoy no cambia nada; ver nota arriba)
-    admitidos = await enrichWithKms(admitidos);
+  // La distancia se calcula de una sola pasada para TODOS los admitidos, no por
+  // carrera: así el cache del geocodificador se aprovecha entre carreras y el
+  // avance que ve el usuario es sobre el total real, no reiniciándose en cada una.
+  const planos = Object.values(admitidosPorCarrera).flat();
+  const enriquecidos = await enrichWithKms(planos, distanceService, onDistanceProgress);
 
-    const mujeres = admitidos.filter(s => s.genero === 'Mujer');
-    const hombres = admitidos.filter(s => s.genero === 'Hombre');
+  let corte = 0;
+  for (const carrera in admitidosPorCarrera) {
+    const n = admitidosPorCarrera[carrera].length;
+    admitidosPorCarrera[carrera] = enriquecidos.slice(corte, corte + n);
+    corte += n;
+  }
+
+  for (const carrera in admitidosPorCarrera) {
+    const seqs = seqsByCareer[carrera];
+    const admitidos = admitidosPorCarrera[carrera];
+    const cupoTotal = seqs.reduce((sum, s) => sum + s.cupo, 0);
+
+    // Dentro de cada sexo, los que viven más lejos van primero. Como las
+    // secuencias ya están ordenadas con las matutinas al frente, eso les da la
+    // preferencia AM. Sin distancias (todas null) el orden vuelve a ser por
+    // promedio, que es como se comportaba antes de existir esta función.
+    const mujeres = admitidos.filter(s => s.genero === 'Mujer').sort(compararPorLejania);
+    const hombres = admitidos.filter(s => s.genero === 'Hombre').sort(compararPorLejania);
     const totalAdmitidos = admitidos.length;
 
     // Se consumen ambas listas con punteros en vez de shift(): shift() es O(n)
     // por llamada (reindexa el arreglo completo), lo que vuelve el reparto
     // O(n²) con cohortes grandes. Avanzar un índice es O(1) y preserva el
-    // mismo orden de asignación (ambas listas ya vienen ordenadas por promedio).
+    // orden de asignación que acaban de fijar los sort() de arriba.
     let mIdx = 0;
     let hIdx = 0;
     const mujeresLeft = () => mujeres.length - mIdx;
