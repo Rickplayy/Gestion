@@ -354,6 +354,7 @@ input, select, textarea {
   margin: 0;
   font-size: 0.85rem;
   line-height: 1.45;
+  text-align: left; /* el contenedor centra; aquí estorba porque es texto corrido */
 }
 
 
