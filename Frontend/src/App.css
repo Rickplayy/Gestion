@@ -312,23 +312,53 @@ input, select, textarea {
   font-style: normal;
 }
 
-/* ----- Ciclo escolar (paso 1) ----- */
-/* El input global es width:100%, que dentro del .step-body (flex) empujaría el
-   resto a otra línea: aquí se acota para que conviva con el selector de archivo. */
-.ciclo-field {
+/* ----- Ciclo escolar (apartado propio, arriba de los pasos) ----- */
+/* Comparte la caja de .step-card para no romper el estilo, pero sin círculo
+   numerado: no es un paso del flujo, es el contexto de toda la generación. */
+.ciclo-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-left: 5px solid var(--ipn-maroon);
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.6rem;
+  box-shadow: 0 2px 8px var(--shadow);
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem;
-  font-size: 0.9rem;
-  font-weight: 600;
-  flex-basis: 100%;
+  justify-content: space-between;
+  gap: 0.75rem 1.5rem;
+  text-align: left;
+  transition: border-color 0.25s;
 }
 
-.ciclo-field input {
+.ciclo-card.is-set {
+  border-left-color: #2e8b57;
+}
+
+.ciclo-card label {
+  cursor: pointer;
+}
+
+.ciclo-card h3 {
+  margin: 0 0 0.15rem;
+  color: var(--text);
+  font-size: 1.1rem;
+}
+
+.ciclo-card p {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+/* El input global es width:100%; aquí se acota para que quede al lado del
+   texto en vez de empujarlo a otra línea. */
+.ciclo-card input {
   width: auto;
-  max-width: 160px;
-  padding: 0.5rem 0.65rem;
-  font-weight: 500;
+  max-width: 180px;
+  padding: 0.6rem 0.75rem;
+  font-size: 1rem;
+  font-weight: 600;
 }
 
 /* ----- Prioridad por distancia (paso 4) ----- */

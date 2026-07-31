@@ -129,7 +129,7 @@ function App() {
       return;
     }
     if (!cicloValido) {
-      setMessage({ text: 'Indica el ciclo escolar en el paso 1 (ej. 26-1).', type: 'error' });
+      setMessage({ text: 'Indica el ciclo escolar hasta arriba (ej. 26-1).', type: 'error' });
       return;
     }
 
@@ -230,13 +230,31 @@ function App() {
             <p className="muted">Sigue los pasos para asignar los grupos a partir de tus archivos de Excel.</p>
           </header>
 
+          {/* Ciclo escolar: no es un paso más, es el contexto de toda la
+              generación (marca el archivo y cada fila), por eso va aparte
+              y arriba en vez de mezclado con la carga de archivos. */}
+          <section className={`ciclo-card ${cicloValido ? 'is-set' : ''}`}>
+            <label htmlFor="ciclo-escolar">
+              <h3>Ciclo escolar</h3>
+              <p className="muted">Identifica la generación. Se guarda en el archivo y en cada fila del resultado.</p>
+            </label>
+            <input
+              id="ciclo-escolar"
+              type="text"
+              maxLength={50}
+              placeholder="Ej. 26-1"
+              value={cicloEscolar}
+              onChange={e => setCicloEscolar(e.target.value)}
+            />
+          </section>
+
           {/* Paso 1 */}
-          <section className={`step-card ${aspirantesFile && cicloValido ? 'is-done' : ''}`}>
+          <section className={`step-card ${aspirantesFile ? 'is-done' : ''}`}>
             <div className="step-head">
-              <span className="step-num">{aspirantesFile && cicloValido ? '✓' : '1'}</span>
+              <span className="step-num">{aspirantesFile ? '✓' : '1'}</span>
               <div className="step-title">
-                <h3>Ciclo escolar y archivo de Aspirantes inscritos</h3>
-                <p className="muted">El ciclo identifica la generación; el archivo se usará para asignar a los alumnos a sus grupos.</p>
+                <h3>Archivo de Aspirantes inscritos</h3>
+                <p className="muted">Se usará para asignar a los alumnos a sus grupos.</p>
               </div>
             </div>
             <div className="step-body">
@@ -253,17 +271,6 @@ function App() {
               <span className={`file-name ${aspirantesFile ? 'has-file' : ''}`}>
                 {aspirantesFile ? aspirantesFile.name : 'Ningún archivo seleccionado'}
               </span>
-
-              <label className="ciclo-field">
-                <span>Ciclo escolar</span>
-                <input
-                  type="text"
-                  maxLength={50}
-                  placeholder="Ej. 26-1"
-                  value={cicloEscolar}
-                  onChange={e => setCicloEscolar(e.target.value)}
-                />
-              </label>
             </div>
           </section>
 
