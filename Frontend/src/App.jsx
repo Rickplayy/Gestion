@@ -8,12 +8,14 @@ import {
   discardSaveTarget,
   normalizeCareer,
 } from './utils/groupGenerator';
-import { createDistanceService, DEFAULT_REFERENCE } from './utils/geo/distance';
+import { createDistanceService, DEFAULT_REFERENCE, DEFAULT_OSRM_URL } from './utils/geo/distance';
 import './App.css';
 
 // Configuración del cálculo de distancias (ver Frontend/.env.example).
 const GEO_CONFIG = {
-  osrmUrl: import.meta.env.VITE_OSRM_URL || '',
+  // ?? y no ||: si el .env trae VITE_OSRM_URL="" es porque se quiere APAGAR el
+  // ruteo; sin definirla, se usa el OSRM público por defecto.
+  osrmUrl: import.meta.env.VITE_OSRM_URL ?? undefined,
   geocoderUrl: import.meta.env.VITE_NOMINATIM_URL || undefined,
   minIntervalMs: Number(import.meta.env.VITE_GEOCODER_INTERVAL_MS) || undefined,
   reference: {
@@ -69,6 +71,8 @@ function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'light');
 
   const cicloValido = cicloEscolar.trim().length > 0;
+  // URL de ruteo que se usará de verdad (undefined en .env => el público).
+  const osrmEnUso = GEO_CONFIG.osrmUrl ?? DEFAULT_OSRM_URL;
 
   // Aplicar el tema al documento y recordarlo (única preferencia que se guarda)
   useEffect(() => {
@@ -402,9 +406,9 @@ function App() {
 
               {usarDistancia && (
                 <p className="muted distancia-nota">
-                  {GEO_CONFIG.osrmUrl
-                    ? `Distancia real por calles vía OSRM (${GEO_CONFIG.osrmUrl}).`
-                    : 'Sin servidor OSRM configurado: la distancia se estima en línea recta. Sirve para ordenar por lejanía, pero no es el kilometraje exacto por calles.'}
+                  {osrmEnUso
+                    ? `Distancia real por calles vía OSRM (${osrmEnUso}).`
+                    : 'Ruteo apagado: la distancia se estima en línea recta. Sirve para ordenar por lejanía, pero no es el kilometraje exacto por calles.'}
                   {' '}Se geocodifica solo colonia, alcaldía y CP —nunca calle y número—, y el proceso puede tardar varios minutos en la primera corrida.
                 </p>
               )}

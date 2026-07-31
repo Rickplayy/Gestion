@@ -23,6 +23,16 @@ import { createGeocoder } from './geocoder';
 // UPIICSA. Mismo valor que traía el .env del backend (UPIICSA_LAT/UPIICSA_LON).
 export const DEFAULT_REFERENCE = { lat: 19.396056, lon: -99.091901 };
 
+// Servidor OSRM de demostración del proyecto. Permite CORS, así que el navegador
+// puede pegarle directo y se obtiene la MISMA distancia real por calles que
+// calculaba el backend, sin levantar nada.
+//
+// Es de cortesía y su política prohíbe uso intensivo: para corridas grandes o de
+// producción hay que levantar OSRM propio y ponerlo en VITE_OSRM_URL. El cache de
+// abajo ayuda mucho (se mide por colonia, no por alumno), pero no es permiso para
+// abusar. Con VITE_OSRM_URL="" se apaga y todo se estima en línea recta.
+export const DEFAULT_OSRM_URL = 'https://router.project-osrm.org';
+
 const EARTH_RADIUS_M = 6371000;
 const toRad = (deg) => (deg * Math.PI) / 180;
 
@@ -45,7 +55,8 @@ export function haversineMeters(from, to) {
  */
 export function createDistanceService(options = {}) {
   const reference = options.reference || DEFAULT_REFERENCE;
-  const osrmUrl = options.osrmUrl || '';
+  // ?? y no ||: pasar "" tiene que poder APAGAR el ruteo, no caer al default.
+  const osrmUrl = options.osrmUrl ?? DEFAULT_OSRM_URL;
   const osrm = osrmUrl ? createOsrmClient(osrmUrl) : null;
   const geocoder = createGeocoder({
     baseUrl: options.geocoderUrl,
@@ -55,6 +66,35 @@ export function createDistanceService(options = {}) {
   // Si OSRM no responde, no tiene caso reintentarlo con cada uno de los miles de
   // alumnos: se marca como caído a la primera y el resto va directo a Haversine.
   let osrmDisponible = Boolean(osrm);
+
+  // El geocodificador ubica por COLONIA, así que todos los alumnos de una misma
+  // colonia comparten punto — y por lo tanto, ruta. Sin este cache 3000 alumnos
+  // serían 3000 peticiones idénticas a OSRM; con él son tantas como colonias
+  // distintas haya (decenas), que es lo que vuelve viable usar el servidor
+  // público. Se guarda la PROMESA, no el resultado: así varios alumnos que caen
+  // en la misma colonia a la vez comparten una sola llamada en vez de lanzar N.
+  const rutas = new Map();
+
+  const medirDesde = (point) => {
+    const key = `${point.lat},${point.lon}`;
+    let pendiente = rutas.get(key);
+    if (pendiente === undefined) {
+      pendiente = (async () => {
+        if (osrm && osrmDisponible) {
+          try {
+            const route = await osrm.route(point, reference);
+            if (route) return { meters: route.meters, source: 'osrm' };
+            // OSRM contestó pero no halló ruta (punto aislado): línea recta.
+          } catch {
+            osrmDisponible = false;
+          }
+        }
+        return { meters: haversineMeters(point, reference), source: 'haversine' };
+      })();
+      rutas.set(key, pendiente);
+    }
+    return pendiente;
+  };
 
   return {
     reference,
@@ -75,23 +115,8 @@ export function createDistanceService(options = {}) {
       const match = await geocoder.locate(domicilio);
       if (!match) return null;
 
-      if (osrm && osrmDisponible) {
-        try {
-          const route = await osrm.route(match.point, reference);
-          if (route) {
-            return { meters: route.meters, nivel: match.nivel, source: 'osrm' };
-          }
-          // OSRM contestó pero no halló ruta (punto aislado): línea recta.
-        } catch {
-          osrmDisponible = false;
-        }
-      }
-
-      return {
-        meters: haversineMeters(match.point, reference),
-        nivel: match.nivel,
-        source: 'haversine',
-      };
+      const ruta = await medirDesde(match.point);
+      return { meters: ruta.meters, nivel: match.nivel, source: ruta.source };
     },
   };
 }

@@ -606,6 +606,14 @@ input, select, textarea {
 .success { background-color: var(--success-bg); color: var(--success-text); }
 .error { background-color: var(--error-bg); color: var(--error-text); }
 
+/* El botón de tema es fixed: el contenido le pasa por debajo y en pantallas
+   angostas se encimaba sobre "Procesar y Descargar", tapándole media orilla.
+   Este colchón al final de la página deja que el último elemento se pueda
+   desplazar por encima del botón en vez de quedar atrapado detrás. */
+main {
+  padding-bottom: calc(52px + 3rem);
+}
+
 /* Botón flotante de tema (abajo a la derecha) */
 .theme-toggle {
   position: fixed;

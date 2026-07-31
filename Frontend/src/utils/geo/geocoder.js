@@ -117,15 +117,23 @@ export function createGeocoder(options = {}) {
      * @param {{colonia?: string|null, delegacion?: string|null, cp?: string|null}} domicilio
      * @returns {Promise<{point: {lat: number, lon: number}, nivel: 1|2|3|4} | null>}
      */
-    locate: async (domicilio) => {
+    locate: (domicilio) => {
       const colonia = norm(domicilio?.colonia);
       const delegacion = norm(domicilio?.delegacion);
       const cp = norm(domicilio?.cp);
 
-      if (!colonia && !delegacion && !cp) return null;
+      if (!colonia && !delegacion && !cp) return Promise.resolve(null);
 
       const key = `${colonia}|${delegacion}|${cp}`;
-      if (cache.has(key)) return cache.get(key);
+
+      // Se guarda la PROMESA, no el resultado: los alumnos se procesan en
+      // paralelo, así que varios de la misma colonia consultan antes de que el
+      // primero conteste. Cacheando el resultado, los N miran un cache vacío y
+      // lanzan N peticiones idénticas; cacheando la promesa, comparten una sola.
+      // Con el límite de 1 petición/segundo del Nominatim público, esa
+      // diferencia son minutos de espera.
+      let pendiente = cache.get(key);
+      if (pendiente !== undefined) return pendiente;
 
       const intentos = [];
       if (colonia && delegacion && cp) {
@@ -141,19 +149,18 @@ export function createGeocoder(options = {}) {
         intentos.push({ nivel: 4, params: { q: `${delegacion}, México` } });
       }
 
-      let resultado = null;
-      for (const intento of intentos) {
-        const point = await enqueue(() => search(intento.params));
-        if (point) {
-          resultado = { point, nivel: intento.nivel };
-          break;
+      pendiente = (async () => {
+        for (const intento of intentos) {
+          const point = await enqueue(() => search(intento.params));
+          if (point) return { point, nivel: intento.nivel };
         }
-      }
+        // El fallo también queda cacheado: sin esto, un domicilio ilegible
+        // reintentaría los 4 niveles por cada alumno que lo comparta.
+        return null;
+      })();
 
-      // Se cachea también el fallo: sin esto, un domicilio ilegible reintentaría
-      // los 4 niveles por cada alumno que lo comparta.
-      cache.set(key, resultado);
-      return resultado;
+      cache.set(key, pendiente);
+      return pendiente;
     },
   };
 }
