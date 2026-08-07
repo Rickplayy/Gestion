@@ -23,5 +23,28 @@ export const createTermRouteSchema = {
   },
 };
 
+export const TermCarreraSchema = Type.Object({
+  id: Type.Integer(),
+  descripcion: Type.String(),
+});
+
+export const TermWithCarrerasSchema = Type.Object({
+  id: Type.Integer(),
+  descripcion: Type.String(),
+  carreras: Type.Array(TermCarreraSchema),
+});
+
+export const TermsResponseSchema = Type.Object({
+  items: Type.Array(TermWithCarrerasSchema),
+});
+
+export const listTermsRouteSchema = {
+  response: {
+    200: TermsResponseSchema,
+  },
+};
+
 export type CreateTermBody = Static<typeof CreateTermBodySchema>;
 export type TermDto = Static<typeof TermSchema>;
+export type TermWithCarreras = Static<typeof TermWithCarrerasSchema>;
+export type TermsResponse = Static<typeof TermsResponseSchema>;

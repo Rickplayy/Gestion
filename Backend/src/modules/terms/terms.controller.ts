@@ -8,6 +8,7 @@ export type TermsController = {
     request: FastifyRequest<{ Body: CreateTermBody }>,
     reply: FastifyReply,
   ) => Promise<FastifyReply>;
+  list: (request: FastifyRequest, reply: FastifyReply) => Promise<FastifyReply>;
 };
 
 export const createTermsController = (service: TermsService): TermsController => ({
@@ -22,5 +23,18 @@ export const createTermsController = (service: TermsService): TermsController =>
     }
 
     return reply.status(201).send(result.value);
+  },
+
+  list: async (_request, reply) => {
+    const result = await service.list();
+
+    if (!result.ok) {
+      return reply.status(errorToStatusCode(result.error.code)).send({
+        code: result.error.code,
+        message: result.error.message,
+      });
+    }
+
+    return reply.status(200).send(result.value);
   },
 });

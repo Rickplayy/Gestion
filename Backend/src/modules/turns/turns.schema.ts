@@ -31,6 +31,60 @@ export const listCarrerasRouteSchema = {
 export type Carrera = Static<typeof CarreraSchema>;
 export type CarrerasResponse = Static<typeof CarrerasResponseSchema>;
 
+// --- Carreras con número de grupos, por ciclo escolar ---
+
+export const CarreraConGruposSchema = Type.Object({
+  id: Type.Integer(),
+  descripcion: Type.String(),
+  totalGrupos: Type.Integer(),
+});
+
+export const CarrerasConGruposResponseSchema = Type.Object({
+  items: Type.Array(CarreraConGruposSchema),
+});
+
+export const listCarrerasPorCicloRouteSchema = {
+  querystring: TermIdQuerySchema,
+  response: {
+    200: CarrerasConGruposResponseSchema,
+    404: ErrorResponseSchema,
+  },
+};
+
+export type CarreraConGrupos = Static<typeof CarreraConGruposSchema>;
+export type CarrerasConGruposResponse = Static<typeof CarrerasConGruposResponseSchema>;
+
+// --- Grupos con número de alumnos, por ciclo escolar + carrera ---
+
+export const GruposPorCarreraQuerySchema = Type.Object({
+  termId: Type.Integer({ minimum: 1 }),
+  carrera: Type.Integer({ minimum: 1 }),
+});
+
+export const GrupoConAlumnosSchema = Type.Object({
+  id: Type.Integer(),
+  secuencia: Type.String(),
+  cupo: Type.Integer(),
+  turno: Type.String(),
+  totalAlumnos: Type.Integer(),
+});
+
+export const GruposConAlumnosResponseSchema = Type.Object({
+  items: Type.Array(GrupoConAlumnosSchema),
+});
+
+export const listGruposPorCarreraRouteSchema = {
+  querystring: GruposPorCarreraQuerySchema,
+  response: {
+    200: GruposConAlumnosResponseSchema,
+    404: ErrorResponseSchema,
+  },
+};
+
+export type GruposPorCarreraQuery = Static<typeof GruposPorCarreraQuerySchema>;
+export type GrupoConAlumnos = Static<typeof GrupoConAlumnosSchema>;
+export type GruposConAlumnosResponse = Static<typeof GruposConAlumnosResponseSchema>;
+
 // --- Grupos ---
 
 export const GrupoInputSchema = Type.Object({

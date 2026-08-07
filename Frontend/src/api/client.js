@@ -1,5 +1,8 @@
+import { mockApi } from './mockClient';
+
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001/api/v1';
 const TOKEN_KEY = 'sige_token';
+const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
 
 export function setToken(token) {
   if (token) sessionStorage.setItem(TOKEN_KEY, token);
@@ -33,11 +36,15 @@ async function request(path, { method = 'GET', body, auth = true } = {}) {
   return data;
 }
 
-export const api = {
+const realApi = {
   login: (username, password) =>
     request('/auth/login', { method: 'POST', body: { username, password }, auth: false }),
   getCarreras: () => request('/turns/carreras', { auth: false }),
+  listTerms: () => request('/terms'),
   createTerm: (descripcion) => request('/terms', { method: 'POST', body: { descripcion } }),
+  getCarrerasPorCiclo: (termId) => request(`/terms/turns/carreras?termId=${termId}`),
+  getGruposPorCarrera: (termId, idCarrera) =>
+    request(`/terms/turns/grupos?termId=${termId}&carrera=${idCarrera}`),
   createGrupos: (termId, grupos) =>
     request(`/terms/turns/grupos?termId=${termId}`, { method: 'POST', body: grupos }),
   createAlumnos: (termId, alumnos) =>
@@ -64,3 +71,5 @@ export const api = {
   getConteo: (termId) => request(`/terms/turns/alumnos/conteo?termId=${termId}`),
   asignarGrupos: (termId) => request(`/terms/turns/grupos/asignar?termId=${termId}`),
 };
+
+export const api = USE_MOCKS ? mockApi : realApi;

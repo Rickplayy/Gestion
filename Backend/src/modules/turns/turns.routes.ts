@@ -8,7 +8,9 @@ import {
   conteoAlumnosRouteSchema,
   createAlumnosRouteSchema,
   createGruposRouteSchema,
+  listCarrerasPorCicloRouteSchema,
   listCarrerasRouteSchema,
+  listGruposPorCarreraRouteSchema,
   queryAlumnosRouteSchema,
   updateDomicilioRouteSchema,
   updateGrupoRouteSchema,
@@ -17,6 +19,7 @@ import {
   type CreateAlumnosBody,
   type CreateGruposBody,
   type DomicilioRegistro,
+  type GruposPorCarreraQuery,
   type TermIdQuery,
   type UpdateGrupoBody,
 } from './turns.schema.js';
@@ -41,6 +44,18 @@ export const turnsRoutes = async (fastify: FastifyInstance): Promise<void> => {
     '/terms/turns/grupos',
     { schema: createGruposRouteSchema, preHandler: [fastify.authenticate] },
     controller.createGrupos,
+  );
+
+  fastify.get<{ Querystring: TermIdQuery }>(
+    '/terms/turns/carreras',
+    { schema: listCarrerasPorCicloRouteSchema, preHandler: [fastify.authenticate] },
+    controller.listCarrerasPorCiclo,
+  );
+
+  fastify.get<{ Querystring: GruposPorCarreraQuery }>(
+    '/terms/turns/grupos',
+    { schema: listGruposPorCarreraRouteSchema, preHandler: [fastify.authenticate] },
+    controller.listGruposPorCarrera,
   );
 
   // Endpoint principal de consulta: filtros combinables por secuencia, carrera y sin asignar.

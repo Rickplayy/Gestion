@@ -9,8 +9,10 @@ import type {
   AlumnoRow,
   AlumnosQuery,
   Carrera,
+  CarreraConGrupos,
   ConteoAlumnosResponse,
   DomicilioRegistro,
+  GrupoConAlumnos,
   GrupoCreated,
   GrupoInput,
   UpdateDomicilioResponse,
@@ -34,6 +36,8 @@ export type UpdateGrupoOutcome =
 
 export type TurnsRepository = {
   listCarreras: () => Promise<Carrera[]>;
+  listCarrerasPorCiclo: (termId: number) => Promise<CarreraConGrupos[]>;
+  listGruposPorCarrera: (termId: number, idCarrera: number) => Promise<GrupoConAlumnos[]>;
   termExists: (termId: number) => Promise<boolean>;
   findExistingSecuencias: (termId: number, secuencias: string[]) => Promise<string[]>;
   insertGrupos: (termId: number, grupos: GrupoInput[]) => Promise<GrupoCreated[]>;
@@ -165,6 +169,18 @@ type ConteoRow = RowDataPacket & {
 };
 type DomicilioIdRow = RowDataPacket & { ID_DOMICILIO: number };
 type GrupoIdRow = RowDataPacket & { ID_GRUPO: number };
+type CarreraConGruposRow = RowDataPacket & {
+  ID_CARRERA: number;
+  DESCRIPCION: string;
+  TOTAL_GRUPOS: number;
+};
+type GrupoConAlumnosRow = RowDataPacket & {
+  ID_GRUPO: number;
+  SECUENCIA: string;
+  CUPO: number;
+  TURNO: string;
+  TOTAL_ALUMNOS: number;
+};
 
 const generoRank = (genero: string): number => (genero === 'F' ? 0 : 1);
 
@@ -206,6 +222,44 @@ export const createTurnsRepository = (db: DbPool, osrm: OsrmClient): TurnsReposi
       [],
     );
     return rows.map((row) => ({ id: row.ID_CARRERA, descripcion: row.DESCRIPCION }));
+  },
+
+  listCarrerasPorCiclo: async (termId) => {
+    const rows = await queryRows<CarreraConGruposRow>(
+      db,
+      `SELECT c.ID_CARRERA, c.DESCRIPCION, COUNT(g.ID_GRUPO) AS TOTAL_GRUPOS
+       FROM \`SIGE_GRUPOS\` g
+       JOIN \`SIGE_CCARRERAS\` c ON c.ID_CARRERA = g.ID_CARRERA
+       WHERE g.ID_CICLO_ESCOLAR = ?
+       GROUP BY c.ID_CARRERA, c.DESCRIPCION
+       ORDER BY c.DESCRIPCION`,
+      [termId],
+    );
+    return rows.map((row) => ({
+      id: row.ID_CARRERA,
+      descripcion: row.DESCRIPCION,
+      totalGrupos: Number(row.TOTAL_GRUPOS),
+    }));
+  },
+
+  listGruposPorCarrera: async (termId, idCarrera) => {
+    const rows = await queryRows<GrupoConAlumnosRow>(
+      db,
+      `SELECT g.ID_GRUPO, g.SECUENCIA, g.CUPO, g.TURNO, COUNT(d.PRE_REGISTRO) AS TOTAL_ALUMNOS
+       FROM \`SIGE_GRUPOS\` g
+       LEFT JOIN \`SIGE_DATOS_INGRESO\` d ON d.ID_GRUPO = g.ID_GRUPO
+       WHERE g.ID_CICLO_ESCOLAR = ? AND g.ID_CARRERA = ?
+       GROUP BY g.ID_GRUPO, g.SECUENCIA, g.CUPO, g.TURNO
+       ORDER BY g.TURNO, g.SECUENCIA`,
+      [termId, idCarrera],
+    );
+    return rows.map((row) => ({
+      id: row.ID_GRUPO,
+      secuencia: row.SECUENCIA,
+      cupo: row.CUPO,
+      turno: row.TURNO,
+      totalAlumnos: Number(row.TOTAL_ALUMNOS),
+    }));
   },
 
   termExists: async (termId) => {

@@ -8,18 +8,25 @@ import type {
   AlumnosQuery,
   AlumnosQueryResponse,
   AsignarGruposResponse,
+  CarrerasConGruposResponse,
   CarrerasResponse,
   ConteoAlumnosResponse,
   CreateAlumnosResponse,
   CreateGruposResponse,
   DomicilioRegistro,
   GrupoInput,
+  GruposConAlumnosResponse,
   UpdateDomicilioResponse,
   UpdateGrupoResponse,
 } from './turns.schema.js';
 
 export type TurnsService = {
   listCarreras: () => Promise<Result<CarrerasResponse, DomainError>>;
+  listCarrerasPorCiclo: (termId: number) => Promise<Result<CarrerasConGruposResponse, DomainError>>;
+  listGruposPorCarrera: (
+    termId: number,
+    idCarrera: number,
+  ) => Promise<Result<GruposConAlumnosResponse, DomainError>>;
   createGrupos: (
     termId: number,
     grupos: GrupoInput[],
@@ -73,6 +80,24 @@ export const createTurnsService = (
 ): TurnsService => ({
   listCarreras: async () => {
     const items = await repository.listCarreras();
+    return ok({ items });
+  },
+
+  listCarrerasPorCiclo: async (termId) => {
+    if (!(await repository.termExists(termId))) {
+      return err(domainError(DomainErrorCode.NotFound, TERM_NOT_FOUND));
+    }
+
+    const items = await repository.listCarrerasPorCiclo(termId);
+    return ok({ items });
+  },
+
+  listGruposPorCarrera: async (termId, idCarrera) => {
+    if (!(await repository.termExists(termId))) {
+      return err(domainError(DomainErrorCode.NotFound, TERM_NOT_FOUND));
+    }
+
+    const items = await repository.listGruposPorCarrera(termId, idCarrera);
     return ok({ items });
   },
 

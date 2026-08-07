@@ -7,12 +7,21 @@ import type {
   CreateAlumnosBody,
   CreateGruposBody,
   DomicilioRegistro,
+  GruposPorCarreraQuery,
   TermIdQuery,
   UpdateGrupoBody,
 } from './turns.schema.js';
 
 export type TurnsController = {
   listCarreras: (request: FastifyRequest, reply: FastifyReply) => Promise<FastifyReply>;
+  listCarrerasPorCiclo: (
+    request: FastifyRequest<{ Querystring: TermIdQuery }>,
+    reply: FastifyReply,
+  ) => Promise<FastifyReply>;
+  listGruposPorCarrera: (
+    request: FastifyRequest<{ Querystring: GruposPorCarreraQuery }>,
+    reply: FastifyReply,
+  ) => Promise<FastifyReply>;
   createGrupos: (
     request: FastifyRequest<{ Querystring: TermIdQuery; Body: CreateGruposBody }>,
     reply: FastifyReply,
@@ -54,6 +63,31 @@ export type TurnsController = {
 export const createTurnsController = (service: TurnsService): TurnsController => ({
   listCarreras: async (_request, reply) => {
     const result = await service.listCarreras();
+    if (!result.ok) {
+      return reply.status(errorToStatusCode(result.error.code)).send({
+        code: result.error.code,
+        message: result.error.message,
+      });
+    }
+    return reply.status(200).send(result.value);
+  },
+
+  listCarrerasPorCiclo: async (request, reply) => {
+    const result = await service.listCarrerasPorCiclo(request.query.termId);
+    if (!result.ok) {
+      return reply.status(errorToStatusCode(result.error.code)).send({
+        code: result.error.code,
+        message: result.error.message,
+      });
+    }
+    return reply.status(200).send(result.value);
+  },
+
+  listGruposPorCarrera: async (request, reply) => {
+    const result = await service.listGruposPorCarrera(
+      request.query.termId,
+      request.query.carrera,
+    );
     if (!result.ok) {
       return reply.status(errorToStatusCode(result.error.code)).send({
         code: result.error.code,
