@@ -1,8 +1,5 @@
-import { mockApi } from './mockClient';
-
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001/api/v1';
 const TOKEN_KEY = 'sige_token';
-const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
 
 export function setToken(token) {
   if (token) sessionStorage.setItem(TOKEN_KEY, token);
@@ -36,7 +33,7 @@ async function request(path, { method = 'GET', body, auth = true } = {}) {
   return data;
 }
 
-const realApi = {
+export const api = {
   login: (username, password) =>
     request('/auth/login', { method: 'POST', body: { username, password }, auth: false }),
   getCarreras: () => request('/turns/carreras', { auth: false }),
@@ -63,6 +60,14 @@ const realApi = {
       method: 'PATCH',
       body: domicilio,
     }),
+  // TODO(backend): endpoint aún no existe. Debe recalcular DISTANCIA_METROS
+  // por ruteo directo desde (lat, lon) hacia UPIICSA, sin pasar por el
+  // catálogo de colonias.
+  updateDomicilioCoordenadas: (termId, pr, coords) =>
+    request(`/terms/turns/alumnos/${encodeURIComponent(pr)}/domicilio-coordenadas?termId=${termId}`, {
+      method: 'PATCH',
+      body: coords,
+    }),
   updateGrupoAlumno: (termId, pr, idGrupo) =>
     request(`/terms/turns/alumnos/${encodeURIComponent(pr)}/grupo?termId=${termId}`, {
       method: 'PATCH',
@@ -71,5 +76,3 @@ const realApi = {
   getConteo: (termId) => request(`/terms/turns/alumnos/conteo?termId=${termId}`),
   asignarGrupos: (termId) => request(`/terms/turns/grupos/asignar?termId=${termId}`),
 };
-
-export const api = USE_MOCKS ? mockApi : realApi;

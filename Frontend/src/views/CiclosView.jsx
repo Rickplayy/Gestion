@@ -35,10 +35,11 @@ function CiclosView({ onSelectCiclo, onCreateNew, onMessage }) {
               <div>
                 <div className="entity-card__title">{ciclo.descripcion}</div>
                 <div className="entity-card__meta">
-                  {ciclo.carreras.length === 0 && <span className="muted">Sin carreras aún</span>}
-                  {ciclo.carreras.map((carrera) => (
-                    <span key={carrera.id} className="badge">{carrera.descripcion}</span>
-                  ))}
+                  {ciclo.carreras.length === 0 ? (
+                    <span className="muted">Sin carreras aún</span>
+                  ) : (
+                    <span className="badge">{ciclo.carreras.length} carrera{ciclo.carreras.length === 1 ? '' : 's'}</span>
+                  )}
                 </div>
               </div>
               <span className="entity-card__chevron">›</span>

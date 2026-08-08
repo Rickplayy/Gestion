@@ -4,6 +4,7 @@ import { exportAlumnos } from '../utils/exportAlumnos';
 
 function GruposView({ term, carrera, onSelectGrupo, onBack, onMessage }) {
   const [grupos, setGrupos] = useState(null);
+  const [sinGrupo, setSinGrupo] = useState(null);
   const [isExporting, setIsExporting] = useState(false);
 
   useEffect(() => {
@@ -11,6 +12,10 @@ function GruposView({ term, carrera, onSelectGrupo, onBack, onMessage }) {
       .getGruposPorCarrera(term.id, carrera.id)
       .then((res) => setGrupos(res.items))
       .catch((err) => onMessage({ text: `No se pudieron cargar los grupos: ${err.message}`, type: 'error' }));
+    api
+      .queryAlumnos(term.id, { carrera: [carrera.id], sinAsignar: true })
+      .then((res) => setSinGrupo(res.total))
+      .catch((err) => onMessage({ text: `No se pudo cargar el conteo de alumnos sin grupo: ${err.message}`, type: 'error' }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [term.id, carrera.id]);
 
@@ -52,11 +57,11 @@ function GruposView({ term, carrera, onSelectGrupo, onBack, onMessage }) {
 
       {grupos === null && <p className="loading-state">Cargando…</p>}
 
-      {grupos !== null && grupos.length === 0 && (
+      {grupos !== null && grupos.length === 0 && sinGrupo === 0 && (
         <div className="empty-state">Esta carrera no tiene grupos en este ciclo.</div>
       )}
 
-      {grupos !== null && grupos.length > 0 && (
+      {grupos !== null && (grupos.length > 0 || sinGrupo > 0) && (
         <div className="entity-grid">
           {grupos.map((grupo) => (
             <button key={grupo.id} className="entity-card" onClick={() => onSelectGrupo(grupo)}>
@@ -70,6 +75,21 @@ function GruposView({ term, carrera, onSelectGrupo, onBack, onMessage }) {
               <span className="entity-card__chevron">›</span>
             </button>
           ))}
+
+          {sinGrupo !== null && sinGrupo > 0 && (
+            <button
+              className="entity-card"
+              onClick={() => onSelectGrupo({ id: 'sin-grupo', secuencia: null, turno: null, cupo: null, sinGrupo: true })}
+            >
+              <div>
+                <div className="entity-card__title">Sin grupo</div>
+                <div className="entity-card__meta">
+                  <span className="badge">{sinGrupo} alumno{sinGrupo === 1 ? '' : 's'}</span>
+                </div>
+              </div>
+              <span className="entity-card__chevron">›</span>
+            </button>
+          )}
         </div>
       )}
     </div>

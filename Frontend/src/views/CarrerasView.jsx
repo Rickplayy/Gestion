@@ -64,6 +64,9 @@ function CarrerasView({ term, onSelectCarrera, onBack, onMessage }) {
                 <div className="entity-card__title">{carrera.descripcion}</div>
                 <div className="entity-card__meta">
                   <span className="badge">{carrera.totalGrupos} grupo{carrera.totalGrupos === 1 ? '' : 's'}</span>
+                  <span className="badge">{carrera.totalAlumnos} alumno{carrera.totalAlumnos === 1 ? '' : 's'}</span>
+                  <span className="badge">{carrera.hombres} hombres</span>
+                  <span className="badge">{carrera.mujeres} mujeres</span>
                 </div>
               </div>
               <span className="entity-card__chevron">›</span>
