@@ -1,7 +1,21 @@
-import { limpiar, readSheetRows, findHeaderRow, getXLSX } from "./excelUtils";
+import { limpiar, readSheetRows, findHeaderRow, getXLSX } from './excel';
 
-export const normalizeCareer = (name) => {
-  const n = String(name || '').toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+export type Secuencia = {
+  secuencia: string;
+  turno: string;
+  carrera: string;
+  cupo: number;
+};
+
+export const normalizeCareer = (name: unknown): string => {
+  const DIACRITICS_RE = new RegExp(
+    `[${String.fromCharCode(0x0300)}-${String.fromCharCode(0x036f)}]`,
+    'g',
+  );
+  const n = String(name || '')
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(DIACRITICS_RE, '');
   if (n.includes('ADMINISTRACION')) return 'ADMINISTRACIÓN INDUSTRIAL';
   if (n.includes('CIENCIAS DE LA INFORMATICA')) return 'CIENCIAS DE LA INFORMÁTICA';
   if (n.includes('FERROVIARIA')) return 'INGENIERÍA FERROVIARIA';
@@ -11,7 +25,7 @@ export const normalizeCareer = (name) => {
   return String(name || '').trim();
 };
 
-const getTurnoFromSequence = (seq) => {
+const getTurnoFromSequence = (seq: string): string => {
   if (seq && seq.length >= 3) {
     if (seq[2] === 'M') return 'Matutino';
     if (seq[2] === 'V') return 'Vespertino';
@@ -22,17 +36,17 @@ const getTurnoFromSequence = (seq) => {
 // Lee el archivo "Secuencias primer semestre XX-X.xlsx".
 // Estructura esperada: TURNO | SECUENCIA | CARRERA (con prefijo "A-") | CUPO
 // Regresa [{ secuencia, turno, carrera, cupo }] en el orden del archivo.
-// Se exporta también para que la UI pueda listar las secuencias y ofrecer
-// el editor de porcentajes por secuencia.
-export async function extractSecuencias(buffer) {
+export async function extractSecuencias(buffer: ArrayBuffer): Promise<Secuencia[]> {
   const rows = await readSheetRows(buffer);
 
-  const headerRowIndex = findHeaderRow(rows, ["TURNO", "SECUENCIA", "CUPO"]);
+  const headerRowIndex = findHeaderRow(rows, ['TURNO', 'SECUENCIA', 'CUPO']);
   if (headerRowIndex === -1) {
-    throw new Error("El archivo de Secuencias no tiene las columnas TURNO, SECUENCIA, CARRERA y CUPO");
+    throw new Error(
+      'El archivo de Secuencias no tiene las columnas TURNO, SECUENCIA, CARRERA y CUPO',
+    );
   }
 
-  const secuencias = [];
+  const secuencias: Secuencia[] = [];
   for (let i = headerRowIndex + 1; i < rows.length; i++) {
     const row = rows[i];
     if (!row || row.length < 4) continue;
@@ -53,12 +67,16 @@ export async function extractSecuencias(buffer) {
   }
 
   if (secuencias.length === 0) {
-    throw new Error("No se encontraron secuencias válidas en el archivo");
+    throw new Error('No se encontraron secuencias válidas en el archivo');
   }
   return secuencias;
 }
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+export type SaveTarget =
+  | { handle: FileSystemFileHandle; writable: FileSystemWritableFileStream; cancelled?: undefined }
+  | { cancelled: true; handle?: undefined; writable?: undefined };
 
 // Abre el diálogo "Guardar como" y deja listo el stream de escritura.
 //
@@ -71,27 +89,31 @@ const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.s
 // El stream, en cambio, sigue siendo válido por más que tarde el procesamiento.
 //
 // Regresa: { handle, writable } | { cancelled: true } | null (sin soporte).
-export async function pickSaveTarget(defaultFilename = 'gruposAsignados.xlsx') {
+export async function pickSaveTarget(
+  defaultFilename = 'gruposAsignados.xlsx',
+): Promise<SaveTarget | null> {
   if (!window.showSaveFilePicker) return null;
 
-  let handle;
+  let handle: FileSystemFileHandle;
   try {
     handle = await window.showSaveFilePicker({
       suggestedName: defaultFilename,
-      types: [{
-        description: 'Excel Workbook',
-        accept: { [XLSX_MIME]: ['.xlsx'] },
-      }],
+      types: [
+        {
+          description: 'Excel Workbook',
+          accept: { [XLSX_MIME]: ['.xlsx'] },
+        },
+      ],
     });
   } catch (err) {
-    if (err.name === 'AbortError') return { cancelled: true };
+    if (err instanceof Error && err.name === 'AbortError') return { cancelled: true };
     return null; // sin permiso: se usará la descarga clásica
   }
 
   try {
     return { handle, writable: await handle.createWritable() };
   } catch {
-    await discardSaveTarget({ handle });
+    await discardSaveTarget({ handle } as SaveTarget);
     return null;
   }
 }
@@ -99,22 +121,35 @@ export async function pickSaveTarget(defaultFilename = 'gruposAsignados.xlsx') {
 // Descarta el destino elegido sin dejar rastro. Se usa cuando algo falla
 // después de abrir el diálogo: es preferible no dejar nada a dejar un .xlsx de
 // 0 bytes, que parece descargado pero Excel rechaza como dañado.
-export async function discardSaveTarget(target) {
+export async function discardSaveTarget(target: SaveTarget | null | undefined): Promise<void> {
   if (!target || target.cancelled) return;
-  try { await target.writable?.abort(); } catch { /* ya estaba cerrado */ }
-  try { await target.handle?.remove(); } catch { /* navegador sin remove() */ }
+  try {
+    await target.writable?.abort();
+  } catch {
+    /* ya estaba cerrado */
+  }
+  try {
+    await target.handle?.remove?.();
+  } catch {
+    /* navegador sin remove() */
+  }
 }
+
+export type ExportResult = { name: string; location: 'elegido' | 'descargas' };
 
 // Escribe el Excel. Si hay target (elegido con pickSaveTarget) escribe ahí;
 // si no, descarga clásica del navegador con el nombre sugerido.
-// Regresa { name, location: 'elegido' | 'descargas' }.
-export async function exportToExcel(data, defaultFilename = 'gruposAsignados.xlsx', target = null) {
+export async function exportToExcel(
+  data: Record<string, unknown>[],
+  defaultFilename = 'gruposAsignados.xlsx',
+  target: SaveTarget | null = null,
+): Promise<ExportResult> {
   const XLSX = await getXLSX();
   const ws = XLSX.utils.json_to_sheet(data);
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Grupos Asignados");
+  XLSX.utils.book_append_sheet(wb, ws, 'Grupos Asignados');
 
-  const bytes = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const bytes = XLSX.write(wb, { bookType: 'xlsx', type: 'array' }) as ArrayBuffer;
 
   if (target?.writable) {
     const saved = await writeToTarget(target, bytes);
@@ -129,7 +164,8 @@ export async function exportToExcel(data, defaultFilename = 'gruposAsignados.xls
 
 // Escribe en el destino elegido y confirma que el archivo quedó con contenido.
 // Regresa el nombre guardado, o null si no se pudo (el llamador descarga).
-async function writeToTarget(target, bytes) {
+async function writeToTarget(target: SaveTarget, bytes: ArrayBuffer): Promise<string | null> {
+  if (!target.writable || !target.handle) return null;
   try {
     await target.writable.write(bytes);
     await target.writable.close();
@@ -143,11 +179,13 @@ async function writeToTarget(target, bytes) {
   // exactamente el caso que Excel reporta como "dañado o extensión no válida",
   // así que se confirma el tamaño antes de dar el guardado por bueno.
   try {
-    const { size } = await target.handle.getFile();
-    if (size === bytes.byteLength) return target.handle.name;
-  } catch { /* no se pudo releer: se trata como fallo */ }
+    const file = await target.handle.getFile();
+    if (file.size === bytes.byteLength) return target.handle.name;
+  } catch {
+    /* no se pudo releer: se trata como fallo */
+  }
 
-  await discardSaveTarget({ handle: target.handle });
+  await discardSaveTarget({ handle: target.handle } as SaveTarget);
   return null;
 }
 
@@ -156,7 +194,7 @@ async function writeToTarget(target, bytes) {
 // la dispara el navegador de forma asíncrona; revocar de inmediato corta la
 // lectura a la mitad y el .xlsx queda truncado (más notorio cuantos más
 // alumnos trae). Se espera un momento antes de liberar la URL.
-function downloadBytes(bytes, filename) {
+function downloadBytes(bytes: ArrayBuffer, filename: string): void {
   const url = URL.createObjectURL(new Blob([bytes], { type: XLSX_MIME }));
   const a = document.createElement('a');
   a.href = url;

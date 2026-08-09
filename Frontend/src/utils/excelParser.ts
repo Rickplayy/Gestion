@@ -1,20 +1,45 @@
-import { limpiar, readSheetRows, findHeaderRow } from "./excelUtils";
+import { limpiar, readSheetRows, findHeaderRow } from './excel';
 
-function extraerDomicilio(domicilio) {
+export type AspiranteParseado = {
+  BOLETA: string | null;
+  PR: string | null;
+  CURP: string | null;
+  NOMBRE: string | null;
+  DOMICILIO: string | null;
+  ENTIDAD_FEDERATIVA: string | null;
+  FECHA_NACIMIENTO: string | null;
+  GENERO: string | null;
+  UNIDAD_ACADEMICA: string | null;
+  PROGRAMA_EDUCATIVO: string | null;
+  ESCUELA_PROCEDENCIA: string | null;
+  ENTIDAD_ESCUELA_PROCEDENCIA: string | null;
+  EMAIL: string | null;
+  SEMESTRE: string | null;
+  ESTADO: string | null;
+  PROMEDIO: string | null;
+  FOLIO: string | null;
+  calle: string | null;
+  colonia: string | null;
+  delegacion: string | null;
+  cp: string | null;
+};
+
+type DomicilioExtraido = {
+  calle: string | null;
+  colonia: string | null;
+  delegacion: string | null;
+  cp: string | null;
+};
+
+function extraerDomicilio(domicilio: string): DomicilioExtraido {
   const d = limpiar(domicilio);
 
-  const regex =
-    /^(.*?)\s+COL(?:ONIA)?\.?\s+(.*?)\s+DELEG\.?\s+(.*?)\s+C\.?P\.?\s*(\d{5})/i;
+  const regex = /^(.*?)\s+COL(?:ONIA)?\.?\s+(.*?)\s+DELEG\.?\s+(.*?)\s+C\.?P\.?\s*(\d{5})/i;
 
   const match = d.match(regex);
 
   if (!match) {
-    return {
-      calle: null,
-      colonia: null,
-      delegacion: null,
-      cp: null,
-    };
+    return { calle: null, colonia: null, delegacion: null, cp: null };
   }
 
   return {
@@ -25,28 +50,33 @@ function extraerDomicilio(domicilio) {
   };
 }
 
-function esFilaDatos(row) {
+function esFilaDatos(row: string[]): boolean {
   const curp = limpiar(row[2]);
   return /^[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]\d$/i.test(curp);
 }
 
-function aTexto(valor) {
+function aTexto(valor: unknown): string | null {
   const v = limpiar(valor);
-  return v === "" ? null : v;
+  return v === '' ? null : v;
 }
 
-export async function parseExcelBuffer(buffer) {
+export async function parseExcelBuffer(buffer: ArrayBuffer): Promise<AspiranteParseado[]> {
   const rows = await readSheetRows(buffer);
 
   const headerRowIndex = findHeaderRow(rows, [
-    "BOLETA", "CURP", "NOMBRE", "DOMICILIO", "EMAIL", "FOLIO",
+    'BOLETA',
+    'CURP',
+    'NOMBRE',
+    'DOMICILIO',
+    'EMAIL',
+    'FOLIO',
   ]);
 
   if (headerRowIndex === -1) {
-    throw new Error("No se encontró la fila de encabezados reales");
+    throw new Error('No se encontró la fila de encabezados reales');
   }
 
-  const resultados = [];
+  const resultados: AspiranteParseado[] = [];
 
   for (let i = headerRowIndex + 1; i < rows.length; i++) {
     const row = rows[i];
@@ -57,7 +87,7 @@ export async function parseExcelBuffer(buffer) {
     const domicilio = limpiar(row[4]);
     const domicilioParseado = extraerDomicilio(domicilio);
 
-    const registro = {
+    resultados.push({
       BOLETA: aTexto(row[0]),
       PR: aTexto(row[1]),
       CURP: aTexto(row[2]),
@@ -79,9 +109,7 @@ export async function parseExcelBuffer(buffer) {
       colonia: domicilioParseado.colonia,
       delegacion: domicilioParseado.delegacion,
       cp: domicilioParseado.cp,
-    };
-
-    resultados.push(registro);
+    });
   }
 
   return resultados;
