@@ -6,6 +6,7 @@ import type {
   AlumnosQuery,
   CreateAlumnosBody,
   CreateGruposBody,
+  DomicilioCoordenadas,
   DomicilioRegistro,
   GruposPorCarreraQuery,
   TermIdQuery,
@@ -40,6 +41,18 @@ export type TurnsController = {
       Querystring: TermIdQuery;
       Body: DomicilioRegistro;
     }>,
+    reply: FastifyReply,
+  ) => Promise<FastifyReply>;
+  updateDomicilioCoordenadas: (
+    request: FastifyRequest<{
+      Params: AlumnoPrParams;
+      Querystring: TermIdQuery;
+      Body: DomicilioCoordenadas;
+    }>,
+    reply: FastifyReply,
+  ) => Promise<FastifyReply>;
+  getDomicilio: (
+    request: FastifyRequest<{ Params: AlumnoPrParams; Querystring: TermIdQuery }>,
     reply: FastifyReply,
   ) => Promise<FastifyReply>;
   updateGrupo: (
@@ -132,6 +145,32 @@ export const createTurnsController = (service: TurnsService): TurnsController =>
 
   updateDomicilio: async (request, reply) => {
     const result = await service.updateDomicilio(request.params.pr, request.query.termId, request.body);
+    if (!result.ok) {
+      return reply.status(errorToStatusCode(result.error.code)).send({
+        code: result.error.code,
+        message: result.error.message,
+      });
+    }
+    return reply.status(200).send(result.value);
+  },
+
+  updateDomicilioCoordenadas: async (request, reply) => {
+    const result = await service.updateDomicilioCoordenadas(
+      request.params.pr,
+      request.query.termId,
+      request.body,
+    );
+    if (!result.ok) {
+      return reply.status(errorToStatusCode(result.error.code)).send({
+        code: result.error.code,
+        message: result.error.message,
+      });
+    }
+    return reply.status(200).send(result.value);
+  },
+
+  getDomicilio: async (request, reply) => {
+    const result = await service.getDomicilio(request.params.pr, request.query.termId);
     if (!result.ok) {
       return reply.status(errorToStatusCode(result.error.code)).send({
         code: result.error.code,

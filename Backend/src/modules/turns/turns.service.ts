@@ -3,6 +3,7 @@ import type { TurnsRepository } from './turns.repository.js';
 import { ok, err, type Result } from '../../shared/result/index.js';
 import { domainError, DomainErrorCode, type DomainError } from '../../shared/errors/index.js';
 import type {
+  AlumnoDomicilioResponse,
   AlumnoFallido,
   AlumnoRegistroInput,
   AlumnosQuery,
@@ -13,9 +14,11 @@ import type {
   ConteoAlumnosResponse,
   CreateAlumnosResponse,
   CreateGruposResponse,
+  DomicilioCoordenadas,
   DomicilioRegistro,
   GrupoInput,
   GruposConAlumnosResponse,
+  UpdateDomicilioCoordenadasResponse,
   UpdateDomicilioResponse,
   UpdateGrupoResponse,
 } from './turns.schema.js';
@@ -41,6 +44,15 @@ export type TurnsService = {
     termId: number,
     domicilio: DomicilioRegistro,
   ) => Promise<Result<UpdateDomicilioResponse, DomainError>>;
+  updateDomicilioCoordenadas: (
+    pr: string,
+    termId: number,
+    coords: DomicilioCoordenadas,
+  ) => Promise<Result<UpdateDomicilioCoordenadasResponse, DomainError>>;
+  getDomicilio: (
+    pr: string,
+    termId: number,
+  ) => Promise<Result<AlumnoDomicilioResponse, DomainError>>;
   updateGrupo: (
     pr: string,
     termId: number,
@@ -88,7 +100,22 @@ export const createTurnsService = (
       return err(domainError(DomainErrorCode.NotFound, TERM_NOT_FOUND));
     }
 
-    const items = await repository.listCarrerasPorCiclo(termId);
+    const [carreras, conteo] = await Promise.all([
+      repository.listCarrerasPorCiclo(termId),
+      repository.countByGenero(termId),
+    ]);
+
+    const porId = new Map(conteo.carreras.map((c) => [c.idCarrera, c]));
+    const items = carreras.map((carrera) => {
+      const stats = porId.get(carrera.id);
+      return {
+        ...carrera,
+        totalAlumnos: stats?.total ?? 0,
+        hombres: stats?.hombres ?? 0,
+        mujeres: stats?.mujeres ?? 0,
+      };
+    });
+
     return ok({ items });
   },
 
@@ -182,6 +209,32 @@ export const createTurnsService = (
     }
 
     const result = await repository.updateDomicilio(pr, termId, domicilio, reference);
+    if (result === null) {
+      return err(domainError(DomainErrorCode.NotFound, ALUMNO_NOT_FOUND));
+    }
+
+    return ok(result);
+  },
+
+  updateDomicilioCoordenadas: async (pr, termId, coords) => {
+    if (!(await repository.termExists(termId))) {
+      return err(domainError(DomainErrorCode.NotFound, TERM_NOT_FOUND));
+    }
+
+    const result = await repository.updateDomicilioCoordenadas(pr, termId, coords, reference);
+    if (result === null) {
+      return err(domainError(DomainErrorCode.NotFound, ALUMNO_NOT_FOUND));
+    }
+
+    return ok(result);
+  },
+
+  getDomicilio: async (pr, termId) => {
+    if (!(await repository.termExists(termId))) {
+      return err(domainError(DomainErrorCode.NotFound, TERM_NOT_FOUND));
+    }
+
+    const result = await repository.getDomicilio(pr, termId);
     if (result === null) {
       return err(domainError(DomainErrorCode.NotFound, ALUMNO_NOT_FOUND));
     }

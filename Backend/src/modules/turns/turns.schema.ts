@@ -37,6 +37,9 @@ export const CarreraConGruposSchema = Type.Object({
   id: Type.Integer(),
   descripcion: Type.String(),
   totalGrupos: Type.Integer(),
+  totalAlumnos: Type.Integer(),
+  hombres: Type.Integer(),
+  mujeres: Type.Integer(),
 });
 
 export const CarrerasConGruposResponseSchema = Type.Object({
@@ -255,6 +258,62 @@ export const updateDomicilioRouteSchema = {
 
 export type UpdateDomicilioResponse = Static<typeof UpdateDomicilioResponseSchema>;
 
+// --- Consulta del domicilio actual (para precargar el modal de edición) ---
+
+export const AlumnoDomicilioResponseSchema = Type.Object({
+  pr: Type.String(),
+  calle: Type.Union([Type.String(), Type.Null()]),
+  numero: Type.Union([Type.String(), Type.Null()]),
+  colonia: Type.Union([Type.String(), Type.Null()]),
+  delegacion: Type.Union([Type.String(), Type.Null()]),
+  estado: Type.Union([Type.String(), Type.Null()]),
+  cp: Type.Union([Type.String(), Type.Null()]),
+  lat: Type.Union([Type.Number(), Type.Null()]),
+  lon: Type.Union([Type.Number(), Type.Null()]),
+});
+
+export const getAlumnoDomicilioRouteSchema = {
+  params: AlumnoPrParamsSchema,
+  querystring: TermIdQuerySchema,
+  response: {
+    200: AlumnoDomicilioResponseSchema,
+    404: ErrorResponseSchema,
+  },
+};
+
+export type AlumnoDomicilioResponse = Static<typeof AlumnoDomicilioResponseSchema>;
+
+export const DomicilioCoordenadasBodySchema = Type.Object({
+  lat: Type.Number({ minimum: -90, maximum: 90 }),
+  lon: Type.Number({ minimum: -180, maximum: 180 }),
+});
+
+export const UpdateDomicilioCoordenadasResponseSchema = Type.Object({
+  pr: Type.String(),
+  distanceMeters: Type.Union([Type.Number(), Type.Null()]),
+  nivel: Type.Union([
+    Type.Literal(0),
+    Type.Literal(1),
+    Type.Literal(2),
+    Type.Literal(3),
+    Type.Literal(4),
+    Type.Null(),
+  ]),
+});
+
+export const updateDomicilioCoordenadasRouteSchema = {
+  params: AlumnoPrParamsSchema,
+  querystring: TermIdQuerySchema,
+  body: DomicilioCoordenadasBodySchema,
+  response: {
+    200: UpdateDomicilioCoordenadasResponseSchema,
+    404: ErrorResponseSchema,
+  },
+};
+
+export type DomicilioCoordenadas = Static<typeof DomicilioCoordenadasBodySchema>;
+export type UpdateDomicilioCoordenadasResponse = Static<typeof UpdateDomicilioCoordenadasResponseSchema>;
+
 export const UpdateGrupoBodySchema = Type.Object({
   idGrupo: Type.Union([Type.Integer({ minimum: 1 }), Type.Null()]),
 });
@@ -290,6 +349,7 @@ export type AlumnosQuery = Static<typeof AlumnosQuerySchema>;
 
 export const AlumnoRowSchema = Type.Object({
   pr: Type.String(),
+  boleta: Type.Union([Type.String(), Type.Null()]),
   nombre: Type.String(),
   genero: Type.String(),
   promedio: Type.Union([Type.Number(), Type.Null()]),

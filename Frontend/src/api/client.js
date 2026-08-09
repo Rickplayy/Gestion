@@ -55,14 +55,13 @@ export const api = {
     if (filters.sinAsignar !== undefined) params.set('sinAsignar', String(filters.sinAsignar));
     return request(`/terms/turns/alumnos?${params.toString()}`);
   },
+  getDomicilio: (termId, pr) =>
+    request(`/terms/turns/alumnos/${encodeURIComponent(pr)}/domicilio?termId=${termId}`),
   updateDomicilio: (termId, pr, domicilio) =>
     request(`/terms/turns/alumnos/${encodeURIComponent(pr)}/domicilio?termId=${termId}`, {
       method: 'PATCH',
       body: domicilio,
     }),
-  // TODO(backend): endpoint aún no existe. Debe recalcular DISTANCIA_METROS
-  // por ruteo directo desde (lat, lon) hacia UPIICSA, sin pasar por el
-  // catálogo de colonias.
   updateDomicilioCoordenadas: (termId, pr, coords) =>
     request(`/terms/turns/alumnos/${encodeURIComponent(pr)}/domicilio-coordenadas?termId=${termId}`, {
       method: 'PATCH',

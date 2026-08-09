@@ -5,18 +5,23 @@ import type { DbPool } from '../../infra/db/pool.js';
 import { queryRows, queryOne, execute, withTransaction } from '../../infra/db/query.js';
 import { parseDateDDMMYYYY } from '../../shared/dates/parse-date.js';
 import type {
+  AlumnoDomicilioResponse,
   AlumnoRegistroInput,
   AlumnoRow,
   AlumnosQuery,
   Carrera,
   CarreraConGrupos,
   ConteoAlumnosResponse,
+  DomicilioCoordenadas,
   DomicilioRegistro,
   GrupoConAlumnos,
   GrupoCreated,
   GrupoInput,
+  UpdateDomicilioCoordenadasResponse,
   UpdateDomicilioResponse,
 } from './turns.schema.js';
+
+type CarreraConGruposBase = Omit<CarreraConGrupos, 'totalAlumnos' | 'hombres' | 'mujeres'>;
 
 export type InsertAlumnoOutcome =
   | { status: 'inserted' }
@@ -36,7 +41,7 @@ export type UpdateGrupoOutcome =
 
 export type TurnsRepository = {
   listCarreras: () => Promise<Carrera[]>;
-  listCarrerasPorCiclo: (termId: number) => Promise<CarreraConGrupos[]>;
+  listCarrerasPorCiclo: (termId: number) => Promise<CarreraConGruposBase[]>;
   listGruposPorCarrera: (termId: number, idCarrera: number) => Promise<GrupoConAlumnos[]>;
   termExists: (termId: number) => Promise<boolean>;
   findExistingSecuencias: (termId: number, secuencias: string[]) => Promise<string[]>;
@@ -53,6 +58,13 @@ export type TurnsRepository = {
     domicilio: DomicilioRegistro,
     reference: GeoPoint,
   ) => Promise<UpdateDomicilioResponse | null>;
+  updateDomicilioCoordenadas: (
+    pr: string,
+    termId: number,
+    coords: DomicilioCoordenadas,
+    reference: GeoPoint,
+  ) => Promise<UpdateDomicilioCoordenadasResponse | null>;
+  getDomicilio: (pr: string, termId: number) => Promise<AlumnoDomicilioResponse | null>;
   updateGrupo: (pr: string, termId: number, idGrupo: number | null) => Promise<UpdateGrupoOutcome>;
   countByGenero: (termId: number) => Promise<ConteoAlumnosResponse>;
   assignGroups: (termId: number) => Promise<AsignarGruposResult>;
@@ -151,6 +163,7 @@ type AlumnoAsignacionRow = RowDataPacket & {
 };
 type AlumnoQueryRow = RowDataPacket & {
   PRE_REGISTRO: string;
+  BOLETA: string | null;
   NOMBRE: string;
   GENERO: string;
   PROMEDIO: string | number | null;
@@ -168,6 +181,17 @@ type ConteoRow = RowDataPacket & {
   TOTAL: number;
 };
 type DomicilioIdRow = RowDataPacket & { ID_DOMICILIO: number };
+type AlumnoDomicilioRow = RowDataPacket & {
+  PRE_REGISTRO: string;
+  CALLE: string | null;
+  NUMERO: string | null;
+  COLONIA: string | null;
+  CP: string | null;
+  DELEGACION: string | null;
+  ESTADO: string | null;
+  LAT: string | number | null;
+  LON: string | number | null;
+};
 type GrupoIdRow = RowDataPacket & { ID_GRUPO: number };
 type CarreraConGruposRow = RowDataPacket & {
   ID_CARRERA: number;
@@ -324,7 +348,7 @@ export const createTurnsRepository = (db: DbPool, osrm: OsrmClient): TurnsReposi
 
     const rows = await queryRows<AlumnoQueryRow>(
       db,
-      `SELECT d.PRE_REGISTRO, d.NOMBRE, d.GENERO, d.PROMEDIO, i.DISTANCIA_METROS,
+      `SELECT d.PRE_REGISTRO, d.BOLETA, d.NOMBRE, d.GENERO, d.PROMEDIO, i.DISTANCIA_METROS,
               d.ID_CARRERA, c.DESCRIPCION AS CARRERA, d.ID_GRUPO, g.SECUENCIA, g.TURNO
        FROM \`SIGE_DATOS_INGRESO\` d
        JOIN \`SIGE_CCARRERAS\` c ON c.ID_CARRERA = d.ID_CARRERA
@@ -337,6 +361,7 @@ export const createTurnsRepository = (db: DbPool, osrm: OsrmClient): TurnsReposi
 
     return rows.map((row) => ({
       pr: row.PRE_REGISTRO,
+      boleta: row.BOLETA,
       nombre: row.NOMBRE,
       genero: row.GENERO,
       promedio: row.PROMEDIO === null ? null : Number(row.PROMEDIO),
@@ -466,6 +491,64 @@ export const createTurnsRepository = (db: DbPool, osrm: OsrmClient): TurnsReposi
       domicilio,
       distanceMeters: distancia?.metros ?? null,
       nivel: distancia?.nivel ?? null,
+    };
+  },
+
+  updateDomicilioCoordenadas: async (pr, termId, coords, reference) => {
+    const alumno = await queryOne<IdRow>(
+      db,
+      'SELECT PRE_REGISTRO FROM `SIGE_DATOS_INGRESO` WHERE PRE_REGISTRO = ? AND ID_CICLO_ESCOLAR = ? LIMIT 1',
+      [pr, termId],
+    );
+    if (alumno === null) {
+      return null;
+    }
+
+    const route = await osrm.route({ lat: coords.lat, lon: coords.lon }, reference);
+    const distanceMeters = route !== null ? route.meters : null;
+    const nivel = route !== null ? (0 as const) : null;
+
+    await withTransaction(db, async (conn) => {
+      await execute(conn, 'DELETE FROM `SIGE_INFO_DISTANCIA` WHERE PRE_REGISTRO = ?', [pr]);
+      await execute(
+        conn,
+        'INSERT INTO `SIGE_INFO_DISTANCIA` (`DISTANCIA_METROS`, `NIVEL`, `PRE_REGISTRO`, `LAT`, `LON`) VALUES (?, ?, ?, ?, ?)',
+        [distanceMeters, nivel, pr, coords.lat, coords.lon],
+      );
+    });
+
+    return { pr, distanceMeters, nivel };
+  },
+
+  getDomicilio: async (pr, termId) => {
+    const row = await queryOne<AlumnoDomicilioRow>(
+      db,
+      `SELECT d.PRE_REGISTRO, dom.CALLE, dom.NUMERO, col.NOMBRE AS COLONIA, col.CP,
+              mun.NOMBRE AS DELEGACION, edo.NOMBRE AS ESTADO, i.LAT, i.LON
+       FROM \`SIGE_DATOS_INGRESO\` d
+       LEFT JOIN \`SIGE_DOMICILIOS\` dom ON dom.ID_DOMICILIO = d.ID_DOMICILIO
+       LEFT JOIN \`SIGE_CCOLONIAS\` col ON col.ID_COLONIA = dom.ID_COLONIA
+       LEFT JOIN \`SIGE_CMUNICIPIOS\` mun ON mun.ID_MUNICIPIO = col.ID_MUNICIPIO
+       LEFT JOIN \`SIGE_CEDOS\` edo ON edo.ID_EDO = mun.ID_EDO
+       LEFT JOIN \`SIGE_INFO_DISTANCIA\` i ON i.PRE_REGISTRO = d.PRE_REGISTRO
+       WHERE d.PRE_REGISTRO = ? AND d.ID_CICLO_ESCOLAR = ?
+       LIMIT 1`,
+      [pr, termId],
+    );
+    if (row === null) {
+      return null;
+    }
+
+    return {
+      pr: row.PRE_REGISTRO,
+      calle: row.CALLE,
+      numero: row.NUMERO,
+      colonia: row.COLONIA,
+      delegacion: row.DELEGACION,
+      estado: row.ESTADO,
+      cp: row.CP,
+      lat: row.LAT === null ? null : Number(row.LAT),
+      lon: row.LON === null ? null : Number(row.LON),
     };
   },
 

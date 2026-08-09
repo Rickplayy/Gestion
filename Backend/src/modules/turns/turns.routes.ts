@@ -8,16 +8,19 @@ import {
   conteoAlumnosRouteSchema,
   createAlumnosRouteSchema,
   createGruposRouteSchema,
+  getAlumnoDomicilioRouteSchema,
   listCarrerasPorCicloRouteSchema,
   listCarrerasRouteSchema,
   listGruposPorCarreraRouteSchema,
   queryAlumnosRouteSchema,
+  updateDomicilioCoordenadasRouteSchema,
   updateDomicilioRouteSchema,
   updateGrupoRouteSchema,
   type AlumnoPrParams,
   type AlumnosQuery,
   type CreateAlumnosBody,
   type CreateGruposBody,
+  type DomicilioCoordenadas,
   type DomicilioRegistro,
   type GruposPorCarreraQuery,
   type TermIdQuery,
@@ -75,6 +78,18 @@ export const turnsRoutes = async (fastify: FastifyInstance): Promise<void> => {
     '/terms/turns/alumnos/:pr/domicilio',
     { schema: updateDomicilioRouteSchema, preHandler: [fastify.authenticate] },
     controller.updateDomicilio,
+  );
+
+  fastify.patch<{ Params: AlumnoPrParams; Querystring: TermIdQuery; Body: DomicilioCoordenadas }>(
+    '/terms/turns/alumnos/:pr/domicilio-coordenadas',
+    { schema: updateDomicilioCoordenadasRouteSchema, preHandler: [fastify.authenticate] },
+    controller.updateDomicilioCoordenadas,
+  );
+
+  fastify.get<{ Params: AlumnoPrParams; Querystring: TermIdQuery }>(
+    '/terms/turns/alumnos/:pr/domicilio',
+    { schema: getAlumnoDomicilioRouteSchema, preHandler: [fastify.authenticate] },
+    controller.getDomicilio,
   );
 
   fastify.patch<{ Params: AlumnoPrParams; Querystring: TermIdQuery; Body: UpdateGrupoBody }>(

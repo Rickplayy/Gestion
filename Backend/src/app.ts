@@ -43,6 +43,7 @@ export const buildApp = async (env: Env = loadEnv()) => {
   await app.register(cors, {
     origin: resolveCorsOrigin(env),
     credentials: true,
+    methods: ['GET', 'HEAD', 'POST', 'PATCH'],
   });
 
   await app.register(dbPlugin);

@@ -11,6 +11,7 @@ function EditAlumnoModal({ alumno, term, carrera, onClose, onSaved, onMessage })
   const [lat, setLat] = useState('');
   const [lon, setLon] = useState('');
   const [isRecalculando, setIsRecalculando] = useState(false);
+  const [isLoadingDomicilio, setIsLoadingDomicilio] = useState(true);
 
   const [grupos, setGrupos] = useState(null);
   const [selectedGrupo, setSelectedGrupo] = useState(alumno.idGrupo == null ? 'sin-grupo' : String(alumno.idGrupo));
@@ -23,6 +24,23 @@ function EditAlumnoModal({ alumno, term, carrera, onClose, onSaved, onMessage })
       .catch((err) => onMessage({ text: `No se pudieron cargar los grupos: ${err.message}`, type: 'error' }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [term.id, carrera.id]);
+
+  useEffect(() => {
+    api
+      .getDomicilio(term.id, alumno.pr)
+      .then((res) => {
+        setEstado(res.estado ?? '');
+        setDelegacion(res.delegacion ?? '');
+        setCp(res.cp ?? '');
+        setCalle(res.calle ?? '');
+        setNumero(res.numero ?? '');
+        setLat(res.lat != null ? String(res.lat) : '');
+        setLon(res.lon != null ? String(res.lon) : '');
+      })
+      .catch((err) => onMessage({ text: `No se pudo cargar el domicilio actual: ${err.message}`, type: 'error' }))
+      .finally(() => setIsLoadingDomicilio(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [term.id, alumno.pr]);
 
   const direccionCompleta = estado.trim() && delegacion.trim() && cp.trim() && calle.trim() && numero.trim();
   const coordenadasCompletas = lat.trim() !== '' && lon.trim() !== '' && !Number.isNaN(Number(lat)) && !Number.isNaN(Number(lon));
@@ -93,6 +111,8 @@ function EditAlumnoModal({ alumno, term, carrera, onClose, onSaved, onMessage })
             Distancia actual: {alumno.distanceMeters != null ? `${Math.round(alumno.distanceMeters / 100) / 10} km` : 'sin calcular'}
           </p>
 
+          {isLoadingDomicilio && <p className="loading-state">Cargando domicilio actual…</p>}
+
           <div className="tab-toggle">
             <button
               type="button"
@@ -134,7 +154,7 @@ function EditAlumnoModal({ alumno, term, carrera, onClose, onSaved, onMessage })
                   <input id="calle" value={calle} onChange={(e) => setCalle(e.target.value)} />
                 </div>
               </div>
-              <button className="btn-file" onClick={handleRecalcularDireccion} disabled={!direccionCompleta || isRecalculando}>
+              <button className="btn-file" onClick={handleRecalcularDireccion} disabled={!direccionCompleta || isRecalculando || isLoadingDomicilio}>
                 {isRecalculando ? 'Recalculando…' : 'Recalcular'}
               </button>
             </>
@@ -150,7 +170,7 @@ function EditAlumnoModal({ alumno, term, carrera, onClose, onSaved, onMessage })
                   <input id="lon" value={lon} onChange={(e) => setLon(e.target.value)} placeholder="Ej. -99.0919" />
                 </div>
               </div>
-              <button className="btn-file" onClick={handleRecalcularCoordenadas} disabled={!coordenadasCompletas || isRecalculando}>
+              <button className="btn-file" onClick={handleRecalcularCoordenadas} disabled={!coordenadasCompletas || isRecalculando || isLoadingDomicilio}>
                 {isRecalculando ? 'Recalculando…' : 'Recalcular'}
               </button>
             </>
