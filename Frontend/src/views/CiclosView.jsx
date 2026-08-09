@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
+import HeadTotals from '../components/HeadTotals';
 
 function CiclosView({ onSelectCiclo, onCreateNew, onMessage }) {
   const [ciclos, setCiclos] = useState(null);
+  const totalCiclos = ciclos?.length ?? null;
 
   useEffect(() => {
     api
@@ -18,6 +20,9 @@ function CiclosView({ onSelectCiclo, onCreateNew, onMessage }) {
         <div>
           <h2>Ciclos escolares</h2>
           <p className="muted">Selecciona un ciclo para ver sus carreras y grupos, o crea uno nuevo.</p>
+          <HeadTotals
+            stats={[{ label: totalCiclos === 1 ? 'ciclo escolar' : 'ciclos escolares', value: totalCiclos }]}
+          />
         </div>
         <button className="btn-file" onClick={onCreateNew}>+ Nuevo ciclo escolar</button>
       </div>

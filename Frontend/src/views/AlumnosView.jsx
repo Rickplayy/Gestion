@@ -2,11 +2,15 @@ import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import { exportAlumnos } from '../utils/exportAlumnos';
 import EditAlumnoModal from '../components/EditAlumnoModal';
+import HeadTotals from '../components/HeadTotals';
 
 function AlumnosView({ term, carrera, grupo, onBack, onMessage }) {
   const [alumnos, setAlumnos] = useState(null);
   const [isExporting, setIsExporting] = useState(false);
   const [editingAlumno, setEditingAlumno] = useState(null);
+
+  const mujeres = alumnos === null ? null : alumnos.filter((alumno) => alumno.genero === 'F').length;
+  const hombres = alumnos === null ? null : alumnos.length - mujeres;
 
   const fetchAlumnos = () => {
     const filters = grupo.sinGrupo
@@ -63,6 +67,13 @@ function AlumnosView({ term, carrera, grupo, onBack, onMessage }) {
             {term.descripcion} · {carrera.descripcion}
             {!grupo.sinGrupo && ` · ${grupo.turno === 'M' ? 'Matutino' : 'Vespertino'}`}
           </p>
+          <HeadTotals
+            stats={[
+              { label: alumnos?.length === 1 ? 'alumno' : 'alumnos', value: alumnos?.length ?? null },
+              { label: 'hombres', value: hombres },
+              { label: 'mujeres', value: mujeres },
+            ]}
+          />
         </div>
         <button className="btn-file" onClick={handleExport} disabled={isExporting || !alumnos?.length}>
           {isExporting ? 'Exportando…' : 'Exportar Excel'}

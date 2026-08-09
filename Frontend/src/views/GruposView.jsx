@@ -1,11 +1,16 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import { exportAlumnos } from '../utils/exportAlumnos';
+import HeadTotals from '../components/HeadTotals';
 
 function GruposView({ term, carrera, onSelectGrupo, onBack, onMessage }) {
   const [grupos, setGrupos] = useState(null);
   const [sinGrupo, setSinGrupo] = useState(null);
   const [isExporting, setIsExporting] = useState(false);
+
+  const asignados = grupos === null ? null : grupos.reduce((acc, grupo) => acc + grupo.totalAlumnos, 0);
+  const cupo = grupos === null ? null : grupos.reduce((acc, grupo) => acc + grupo.cupo, 0);
+  const totalAlumnos = asignados === null ? null : asignados + (sinGrupo ?? 0);
 
   useEffect(() => {
     api
@@ -49,6 +54,14 @@ function GruposView({ term, carrera, onSelectGrupo, onBack, onMessage }) {
         <div>
           <h2>Grupos</h2>
           <p className="muted">{term.descripcion} · {carrera.descripcion}</p>
+          <HeadTotals
+            stats={[
+              { label: grupos?.length === 1 ? 'grupo' : 'grupos', value: grupos?.length ?? null },
+              { label: 'alumnos', value: totalAlumnos },
+              { label: 'lugares de cupo', value: cupo },
+              { label: 'sin grupo', value: sinGrupo > 0 ? sinGrupo : null },
+            ]}
+          />
         </div>
         <button className="btn-file" onClick={handleExport} disabled={isExporting}>
           {isExporting ? 'Exportando…' : 'Exportar Excel de la carrera'}

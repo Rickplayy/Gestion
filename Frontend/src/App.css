@@ -169,6 +169,20 @@ body {
   margin: 0;
 }
 
+.page-head__totals {
+  margin-top: 0.4rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.85rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.page-head__totals strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
 .generator-head {
   text-align: center;
   margin-bottom: 1.5rem;

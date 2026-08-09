@@ -1,10 +1,23 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import { exportAlumnos } from '../utils/exportAlumnos';
+import HeadTotals from '../components/HeadTotals';
 
 function CarrerasView({ term, onSelectCarrera, onBack, onMessage }) {
   const [carreras, setCarreras] = useState(null);
   const [isExporting, setIsExporting] = useState(false);
+
+  const totales = carreras === null
+    ? null
+    : carreras.reduce(
+        (acc, carrera) => ({
+          grupos: acc.grupos + carrera.totalGrupos,
+          alumnos: acc.alumnos + carrera.totalAlumnos,
+          hombres: acc.hombres + carrera.hombres,
+          mujeres: acc.mujeres + carrera.mujeres,
+        }),
+        { grupos: 0, alumnos: 0, hombres: 0, mujeres: 0 },
+      );
 
   useEffect(() => {
     api
@@ -44,6 +57,15 @@ function CarrerasView({ term, onSelectCarrera, onBack, onMessage }) {
         <div>
           <h2>Carreras</h2>
           <p className="muted">Ciclo escolar: {term.descripcion}</p>
+          <HeadTotals
+            stats={[
+              { label: carreras?.length === 1 ? 'carrera' : 'carreras', value: carreras?.length ?? null },
+              { label: 'grupos', value: totales?.grupos ?? null },
+              { label: 'alumnos', value: totales?.alumnos ?? null },
+              { label: 'hombres', value: totales?.hombres ?? null },
+              { label: 'mujeres', value: totales?.mujeres ?? null },
+            ]}
+          />
         </div>
         <button className="btn-file" onClick={handleExport} disabled={isExporting}>
           {isExporting ? 'Exportando…' : 'Exportar Excel del ciclo'}
