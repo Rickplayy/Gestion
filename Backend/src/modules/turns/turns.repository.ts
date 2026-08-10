@@ -160,7 +160,15 @@ type AlumnoAsignacionRow = RowDataPacket & {
   PROMEDIO: string | number | null;
   ID_CARRERA: number;
   DISTANCIA_METROS: string | number | null;
+  ID_ESTATUS: number | null;
 };
+
+// Estatus de alumno (SIGE_CESTATUS): 1=Boleta asignada, 2=Documentos
+// incompletos, 3=Validación documental pendiente, 4=Cancelado.
+// Prioridad de asignación 1 > 2 > 3; sin estatus, al final de esos tres;
+// 4 nunca se asigna (se excluye antes de entrar a este comparador).
+const ESTATUS_CANCELADO = 4;
+const estatusRank = (estatus: number | null): number => estatus ?? Number.MAX_SAFE_INTEGER;
 type AlumnoQueryRow = RowDataPacket & {
   PRE_REGISTRO: string;
   BOLETA: string | null;
@@ -208,8 +216,14 @@ type GrupoConAlumnosRow = RowDataPacket & {
 
 const generoRank = (genero: string): number => (genero === 'F' ? 0 : 1);
 
-// Más lejos = mayor prioridad; sin distancia = va al final. Mismo criterio que turns.service.ts.
+// Prioridad: 1) ID_ESTATUS (1 > 2 > 3, sin estatus al final); 2) más lejos = mayor
+// prioridad, sin distancia = al final; 3) género; 4) promedio.
 const compareAlumnoPriority = (a: AlumnoAsignacionRow, b: AlumnoAsignacionRow): number => {
+  const estatusDiff = estatusRank(a.ID_ESTATUS) - estatusRank(b.ID_ESTATUS);
+  if (estatusDiff !== 0) {
+    return estatusDiff;
+  }
+
   const aDist = a.DISTANCIA_METROS === null ? null : Number(a.DISTANCIA_METROS);
   const bDist = b.DISTANCIA_METROS === null ? null : Number(b.DISTANCIA_METROS);
 
@@ -642,7 +656,7 @@ export const createTurnsRepository = (db: DbPool, osrm: OsrmClient): TurnsReposi
 
       const alumnosRows = await queryRows<AlumnoAsignacionRow>(
         conn,
-        `SELECT d.PRE_REGISTRO, d.GENERO, d.PROMEDIO, d.ID_CARRERA, i.DISTANCIA_METROS
+        `SELECT d.PRE_REGISTRO, d.GENERO, d.PROMEDIO, d.ID_CARRERA, i.DISTANCIA_METROS, d.ID_ESTATUS
          FROM \`SIGE_DATOS_INGRESO\` d
          LEFT JOIN \`SIGE_INFO_DISTANCIA\` i ON i.PRE_REGISTRO = d.PRE_REGISTRO
          WHERE d.ID_CICLO_ESCOLAR = ?`,
@@ -659,8 +673,14 @@ export const createTurnsRepository = (db: DbPool, osrm: OsrmClient): TurnsReposi
         }
       }
 
+      // Estatus 4 (Cancelado) nunca entra a la repartición: se queda en Sin
+      // Grupo aunque sobre cupo. Ya cuenta en alumnosRows.length (totalAlumnos)
+      // pero nunca en `asignados`, así que cae en `sinGrupo` correctamente.
       const alumnosPorCarrera = new Map<number, AlumnoAsignacionRow[]>();
       for (const alumno of alumnosRows) {
+        if (alumno.ID_ESTATUS === ESTATUS_CANCELADO) {
+          continue;
+        }
         const list = alumnosPorCarrera.get(alumno.ID_CARRERA);
         if (list === undefined) {
           alumnosPorCarrera.set(alumno.ID_CARRERA, [alumno]);

@@ -4,8 +4,10 @@ import { createTermsService } from './terms.service.js';
 import { createTermsController } from './terms.controller.js';
 import {
   createTermRouteSchema,
+  deleteTermRouteSchema,
   listTermsRouteSchema,
   type CreateTermBody,
+  type TermIdParams,
 } from './terms.schema.js';
 
 export const termsRoutes = async (fastify: FastifyInstance): Promise<void> => {
@@ -23,5 +25,11 @@ export const termsRoutes = async (fastify: FastifyInstance): Promise<void> => {
     '/terms',
     { schema: listTermsRouteSchema, preHandler: [fastify.authenticate] },
     controller.list,
+  );
+
+  fastify.delete<{ Params: TermIdParams }>(
+    '/terms/:termId',
+    { schema: deleteTermRouteSchema, preHandler: [fastify.authenticate] },
+    controller.deleteTerm,
   );
 };

@@ -48,3 +48,22 @@ export type CreateTermBody = Static<typeof CreateTermBodySchema>;
 export type TermDto = Static<typeof TermSchema>;
 export type TermWithCarreras = Static<typeof TermWithCarrerasSchema>;
 export type TermsResponse = Static<typeof TermsResponseSchema>;
+
+export const TermIdParamsSchema = Type.Object({
+  termId: Type.Integer({ minimum: 1 }),
+});
+
+export const DeleteTermResponseSchema = Type.Object({
+  id: Type.Integer(),
+});
+
+export const deleteTermRouteSchema = {
+  params: TermIdParamsSchema,
+  response: {
+    200: DeleteTermResponseSchema,
+    404: ErrorResponseSchema,
+  },
+};
+
+export type TermIdParams = Static<typeof TermIdParamsSchema>;
+export type DeleteTermResponse = Static<typeof DeleteTermResponseSchema>;

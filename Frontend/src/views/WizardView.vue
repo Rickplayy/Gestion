@@ -12,12 +12,7 @@ import Column from 'primevue/column';
 import { api } from '@/api/client';
 import { useBreadcrumbStore } from '@/stores/breadcrumb';
 import { parseExcelBuffer } from '@/utils/excelParser';
-import {
-  extractSecuencias,
-  pickSaveTarget,
-  discardSaveTarget,
-  exportToExcel,
-} from '@/utils/groupGenerator';
+import { extractSecuencias } from '@/utils/groupGenerator';
 import { buildGruposPayload, buildAlumnosPayload, type Omitido } from '@/utils/mapToBackend';
 import type { Carrera, ConteoAlumnosResponse, CreateAlumnosResponse } from '@/types/api';
 
@@ -28,7 +23,10 @@ const breadcrumb = useBreadcrumbStore();
 const carreras = ref<Carrera[]>([]);
 
 onMounted(async () => {
-  breadcrumb.setItems([{ label: 'Ciclos', to: '/ciclos' }, { label: 'Nuevo ciclo escolar' }]);
+  breadcrumb.setItems([
+    { label: 'Ciclos', to: '/ciclos', command: () => router.push({ name: 'ciclos' }) },
+    { label: 'Nuevo ciclo escolar' },
+  ]);
   try {
     const res = await api.getCarreras();
     carreras.value = res.items;
@@ -178,52 +176,20 @@ async function handleConteo() {
   }
 }
 
-// --- Asignar y exportar ---
+// --- Asignar grupos ---
 const isAsignando = ref(false);
 
-async function handleAsignarYExportar() {
+async function handleAsignarGrupos() {
   if (termId.value === null) return;
-  const target = await pickSaveTarget('gruposAsignados.xlsx');
-  if (target?.cancelled) {
-    notify('warn', 'Guardado cancelado.');
-    return;
-  }
-
   isAsignando.value = true;
   try {
-    await api.asignarGrupos(termId.value);
-    const alumnosRes = await api.queryAlumnos(termId.value);
-
-    const rows = alumnosRes.items.map((alumno) => ({
-      Secuencia: alumno.secuencia ?? 'SIN GRUPO',
-      Turno: alumno.turno === 'M' ? 'Matutino' : alumno.turno === 'V' ? 'Vespertino' : '',
-      Carrera: alumno.carrera,
-      PR: alumno.pr,
-      Boleta: alumno.boleta ?? '',
-      Nombre: alumno.nombre,
-      Genero: alumno.genero === 'F' ? 'Mujer' : 'Hombre',
-      Promedio: alumno.promedio ?? '',
-      DistanciaKm:
-        alumno.distanceMeters != null ? Math.round(alumno.distanceMeters / 100) / 10 : '',
-    }));
-
-    if (rows.length === 0) {
-      throw new Error('No hay alumnos registrados en este ciclo.');
-    }
-
-    const saved = await exportToExcel(rows, 'gruposAsignados.xlsx', target);
+    const result = await api.asignarGrupos(termId.value);
     notify(
       'success',
-      saved.location === 'descargas'
-        ? `"${saved.name}" se descargó a tu carpeta de Descargas con ${rows.length} alumnos asignados.`
-        : `"${saved.name}" guardado con ${rows.length} alumnos asignados.`,
+      `Grupos asignados: ${result.asignados} de ${result.totalAlumnos} alumnos (${result.sinGrupo} sin grupo).`,
     );
   } catch (err) {
-    await discardSaveTarget(target);
-    notify(
-      'error',
-      `Error asignando/exportando: ${err instanceof Error ? err.message : String(err)}`,
-    );
+    notify('error', `Error asignando grupos: ${err instanceof Error ? err.message : String(err)}`);
   } finally {
     isAsignando.value = false;
   }
@@ -388,11 +354,11 @@ async function handleAsignarYExportar() {
     </section>
 
     <Button
-      label="Asignar grupos y exportar Excel"
+      label="Asignar grupo"
       class="btn-generate"
       :loading="isAsignando"
       :disabled="termId === null"
-      @click="handleAsignarYExportar"
+      @click="handleAsignarGrupos"
     />
   </div>
 </template>

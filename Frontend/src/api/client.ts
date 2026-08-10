@@ -31,6 +31,9 @@ export const api = {
   createTerm: (descripcion: string) =>
     http.post<{ id: number; descripcion: string }>('/terms', { descripcion }).then((r) => r.data),
 
+  deleteTerm: (termId: number) =>
+    http.delete<{ id: number }>(`/terms/${termId}`).then((r) => r.data),
+
   getCarrerasPorCiclo: (termId: number) =>
     http
       .get<{ items: CarreraConGrupos[] }>(`/terms/turns/carreras?termId=${termId}`)

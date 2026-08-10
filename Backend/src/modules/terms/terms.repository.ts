@@ -1,6 +1,6 @@
 import type { RowDataPacket } from 'mysql2/promise';
 import type { DbPool } from '../../infra/db/pool.js';
-import { queryOne, queryRows, execute } from '../../infra/db/query.js';
+import { queryOne, queryRows, execute, withTransaction } from '../../infra/db/query.js';
 import type { TermDto, TermWithCarreras } from './terms.schema.js';
 
 type TermRow = RowDataPacket & {
@@ -26,6 +26,7 @@ export type TermsRepository = {
   existsById: (id: number) => Promise<boolean>;
   create: (descripcion: string) => Promise<TermDto>;
   listAll: () => Promise<TermWithCarreras[]>;
+  deleteTerm: (id: number) => Promise<void>;
 };
 
 export const createTermsRepository = (db: DbPool): TermsRepository => ({
@@ -93,4 +94,39 @@ export const createTermsRepository = (db: DbPool): TermsRepository => ({
     }
     return mapRow(row);
   },
+
+  // Sin ON DELETE CASCADE en el esquema: hay que borrar en orden manual
+  // dentro de una transacción (info de distancia -> alumnos -> domicilios
+  // huérfanos -> grupos -> el ciclo en sí).
+  deleteTerm: async (id) =>
+    withTransaction(db, async (conn) => {
+      const domicilioRows = await queryRows<RowDataPacket & { ID_DOMICILIO: number | null }>(
+        conn,
+        'SELECT ID_DOMICILIO FROM `SIGE_DATOS_INGRESO` WHERE ID_CICLO_ESCOLAR = ?',
+        [id],
+      );
+      const domicilioIds = domicilioRows
+        .map((row) => row.ID_DOMICILIO)
+        .filter((value): value is number => value !== null);
+
+      await execute(
+        conn,
+        'DELETE FROM `SIGE_INFO_DISTANCIA` WHERE PRE_REGISTRO IN (SELECT PRE_REGISTRO FROM `SIGE_DATOS_INGRESO` WHERE ID_CICLO_ESCOLAR = ?)',
+        [id],
+      );
+
+      await execute(conn, 'DELETE FROM `SIGE_DATOS_INGRESO` WHERE ID_CICLO_ESCOLAR = ?', [id]);
+
+      if (domicilioIds.length > 0) {
+        const placeholders = domicilioIds.map(() => '?').join(', ');
+        await execute(
+          conn,
+          `DELETE FROM \`SIGE_DOMICILIOS\` WHERE ID_DOMICILIO IN (${placeholders})`,
+          domicilioIds,
+        );
+      }
+
+      await execute(conn, 'DELETE FROM `SIGE_GRUPOS` WHERE ID_CICLO_ESCOLAR = ?', [id]);
+      await execute(conn, 'DELETE FROM `SIGE_CCICLO_ESCOLAR` WHERE ID_CICLO_ESCOLAR = ?', [id]);
+    }),
 });

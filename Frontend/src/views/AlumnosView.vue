@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watchEffect } from 'vue';
+import { computed, ref, watchEffect } from 'vue';
 import { useRouter } from 'vue-router';
 import { useToast } from 'primevue/usetoast';
 import Button from 'primevue/button';
@@ -9,6 +9,7 @@ import { api } from '@/api/client';
 import { useBreadcrumbStore } from '@/stores/breadcrumb';
 import { exportAlumnos } from '@/utils/exportAlumnos';
 import EditAlumnoModal from '@/components/EditAlumnoModal.vue';
+import HeadTotals from '@/components/HeadTotals.vue';
 import type { AlumnoRow, CarreraConGrupos, GrupoConAlumnos, Term } from '@/types/api';
 
 const props = defineProps<{ termId: number; carreraId: number; grupoId: string }>();
@@ -25,6 +26,13 @@ const isSinGrupo = () => props.grupoId === 'sin-grupo';
 const alumnos = ref<AlumnoRow[] | null>(null);
 const isExporting = ref(false);
 const editingAlumno = ref<AlumnoRow | null>(null);
+
+const mujeres = computed(() =>
+  alumnos.value === null ? null : alumnos.value.filter((a) => a.genero === 'F').length,
+);
+const hombres = computed(() =>
+  alumnos.value === null || mujeres.value === null ? null : alumnos.value.length - mujeres.value,
+);
 
 async function fetchAlumnos() {
   const filters = isSinGrupo()
@@ -60,11 +68,16 @@ watchEffect(async () => {
         : (gruposRes.items.find((g) => String(g.id) === grupoId) ?? null);
 
     breadcrumb.setItems([
-      { label: 'Ciclos', to: '/ciclos' },
-      { label: term.value?.descripcion ?? `Ciclo ${termId}`, to: `/ciclos/${termId}/carreras` },
+      { label: 'Ciclos', to: '/ciclos', command: () => router.push({ name: 'ciclos' }) },
+      {
+        label: term.value?.descripcion ?? `Ciclo ${termId}`,
+        to: `/ciclos/${termId}/carreras`,
+        command: () => router.push({ name: 'carreras', params: { termId } }),
+      },
       {
         label: carrera.value?.descripcion ?? `Carrera ${carreraId}`,
         to: `/ciclos/${termId}/carreras/${carreraId}/grupos`,
+        command: () => router.push({ name: 'grupos', params: { termId, carreraId } }),
       },
       {
         label:
@@ -144,6 +157,13 @@ function handleSaved() {
             >· {{ grupo.turno === 'M' ? 'Matutino' : 'Vespertino' }}</template
           >
         </p>
+        <HeadTotals
+          :stats="[
+            { label: alumnos?.length === 1 ? 'alumno' : 'alumnos', value: alumnos?.length ?? null },
+            { label: 'hombres', value: hombres },
+            { label: 'mujeres', value: mujeres },
+          ]"
+        />
       </div>
       <Button
         label="Exportar Excel"
@@ -162,17 +182,17 @@ function handleSaved() {
 
     <DataTable v-else :value="alumnos" size="small" scrollable scroll-height="65vh">
       <Column field="pr" header="PR" />
-      <Column field="boleta" header="Boleta">
+      <Column field="boleta" header="Boleta" sortable>
         <template #body="{ data }">{{ data.boleta ?? '—' }}</template>
       </Column>
-      <Column field="nombre" header="Nombre" />
+      <Column field="nombre" header="Nombre" sortable />
       <Column header="Género">
         <template #body="{ data }">{{ data.genero === 'F' ? 'Mujer' : 'Hombre' }}</template>
       </Column>
-      <Column header="Promedio">
+      <Column field="promedio" header="Promedio" sortable>
         <template #body="{ data }">{{ data.promedio ?? '—' }}</template>
       </Column>
-      <Column header="Distancia (km)">
+      <Column field="distanceMeters" header="Distancia (km)" sortable>
         <template #body="{ data }">
           {{ data.distanceMeters != null ? Math.round(data.distanceMeters / 100) / 10 : '—' }}
         </template>

@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router';
 import { useToast } from 'primevue/usetoast';
 import Tag from 'primevue/tag';
 import Button from 'primevue/button';
+import Dialog from 'primevue/dialog';
 import { api } from '@/api/client';
 import { useBreadcrumbStore } from '@/stores/breadcrumb';
 import HeadTotals from '@/components/HeadTotals.vue';
@@ -15,6 +16,8 @@ const toast = useToast();
 const breadcrumb = useBreadcrumbStore();
 
 const ciclos = ref<Term[] | null>(null);
+const cicloToDelete = ref<Term | null>(null);
+const isDeleting = ref(false);
 
 async function load() {
   try {
@@ -37,6 +40,35 @@ onMounted(() => {
 
 function selectCiclo(termId: number) {
   void router.push({ name: 'carreras', params: { termId } });
+}
+
+function askDelete(ciclo: Term) {
+  cicloToDelete.value = ciclo;
+}
+
+async function confirmDelete() {
+  if (cicloToDelete.value === null) return;
+  const ciclo = cicloToDelete.value;
+  isDeleting.value = true;
+  try {
+    await api.deleteTerm(ciclo.id);
+    toast.add({
+      severity: 'success',
+      summary: `Ciclo "${ciclo.descripcion}" eliminado.`,
+      life: 4000,
+    });
+    cicloToDelete.value = null;
+    await load();
+  } catch (err) {
+    toast.add({
+      severity: 'error',
+      summary: 'No se pudo eliminar el ciclo',
+      detail: err instanceof Error ? err.message : String(err),
+      life: 5000,
+    });
+  } finally {
+    isDeleting.value = false;
+  }
 }
 </script>
 
@@ -83,7 +115,42 @@ function selectCiclo(termId: number) {
           severity="success"
           :value="`${ciclo.carreras.length} carrera${ciclo.carreras.length === 1 ? '' : 's'}`"
         />
+        <template #actions>
+          <Button
+            icon="pi pi-trash"
+            severity="danger"
+            text
+            rounded
+            size="small"
+            aria-label="Eliminar ciclo escolar"
+            @click.stop="askDelete(ciclo)"
+          />
+        </template>
       </EntityCard>
     </div>
+
+    <Dialog
+      :visible="cicloToDelete !== null"
+      modal
+      header="Eliminar ciclo escolar"
+      :style="{ width: '28rem', maxWidth: '95vw' }"
+      @update:visible="cicloToDelete = null"
+    >
+      <p>
+        ¿Seguro que quieres eliminar el ciclo <strong>{{ cicloToDelete?.descripcion }}</strong
+        >? Se borrarán también sus grupos y los alumnos registrados en él. Esta acción no se puede
+        deshacer.
+      </p>
+      <template #footer>
+        <Button
+          label="Cancelar"
+          severity="secondary"
+          outlined
+          :disabled="isDeleting"
+          @click="cicloToDelete = null"
+        />
+        <Button label="Eliminar" severity="danger" :loading="isDeleting" @click="confirmDelete" />
+      </template>
+    </Dialog>
   </div>
 </template>

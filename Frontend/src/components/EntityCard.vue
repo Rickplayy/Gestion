@@ -4,15 +4,25 @@ defineEmits<{ click: [] }>();
 </script>
 
 <template>
-  <button type="button" class="entity-card" @click="$emit('click')">
+  <div
+    class="entity-card"
+    role="button"
+    tabindex="0"
+    @click="$emit('click')"
+    @keydown.enter="$emit('click')"
+    @keydown.space.prevent="$emit('click')"
+  >
     <div>
       <div class="entity-card-title">{{ title }}</div>
       <div class="entity-card-meta">
         <slot />
       </div>
     </div>
-    <i class="pi pi-angle-right entity-card-chevron" />
-  </button>
+    <div class="entity-card-end">
+      <slot name="actions" />
+      <i class="pi pi-angle-right entity-card-chevron" />
+    </div>
+  </div>
 </template>
 
 <style scoped>
@@ -30,14 +40,17 @@ defineEmits<{ click: [] }>();
   transition:
     border-color 0.2s,
     transform 0.15s;
-  font: inherit;
-  color: inherit;
   width: 100%;
 }
 
 .entity-card:hover {
   border-color: var(--p-primary-color);
   transform: translateY(-1px);
+}
+
+.entity-card:focus-visible {
+  outline: 2px solid var(--p-primary-color);
+  outline-offset: 2px;
 }
 
 .entity-card-title {
@@ -53,8 +66,14 @@ defineEmits<{ click: [] }>();
   flex-wrap: wrap;
 }
 
-.entity-card-chevron {
+.entity-card-end {
   flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.entity-card-chevron {
   color: var(--p-text-muted-color);
 }
 </style>

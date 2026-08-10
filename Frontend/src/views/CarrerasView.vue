@@ -45,7 +45,7 @@ watchEffect(async () => {
     term.value = termsRes.items.find((t) => t.id === termId) ?? null;
     carreras.value = carrerasRes.items;
     breadcrumb.setItems([
-      { label: 'Ciclos', to: '/ciclos' },
+      { label: 'Ciclos', to: '/ciclos', command: () => router.push({ name: 'ciclos' }) },
       { label: term.value?.descripcion ?? `Ciclo ${termId}` },
     ]);
   } catch (err) {

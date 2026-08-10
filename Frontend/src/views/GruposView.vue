@@ -50,8 +50,12 @@ watchEffect(async () => {
     sinGrupo.value = sinGrupoRes.total;
 
     breadcrumb.setItems([
-      { label: 'Ciclos', to: '/ciclos' },
-      { label: term.value?.descripcion ?? `Ciclo ${termId}`, to: `/ciclos/${termId}/carreras` },
+      { label: 'Ciclos', to: '/ciclos', command: () => router.push({ name: 'ciclos' }) },
+      {
+        label: term.value?.descripcion ?? `Ciclo ${termId}`,
+        to: `/ciclos/${termId}/carreras`,
+        command: () => router.push({ name: 'carreras', params: { termId } }),
+      },
       { label: carrera.value?.descripcion ?? `Carrera ${carreraId}` },
     ]);
   } catch (err) {

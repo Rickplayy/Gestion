@@ -4,6 +4,7 @@ import { ref } from 'vue';
 export type BreadcrumbItem = {
   label: string;
   to?: string;
+  command?: () => void;
 };
 
 export const useBreadcrumbStore = defineStore('breadcrumb', () => {
